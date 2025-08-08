@@ -57,4 +57,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-For more details, see the [GitHub releases](https://github.com/audreyklammer/copilotedge/releases) page.
+For more details, see the [GitHub releases](https://github.com/Klammertime/copilotedge/releases) page.

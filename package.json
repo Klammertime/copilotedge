@@ -13,8 +13,16 @@
   "files": ["dist", "README.md"],
   "description": "Connect CopilotKit to Cloudflare Workers AI",
   "keywords": ["copilotkit", "cloudflare", "ai", "edge", "workers"],
-  "author": "",
+  "author": "Klammertime",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Klammertime/copilotedge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Klammertime/copilotedge/issues"
+  },
+  "homepage": "https://github.com/Klammertime/copilotedge#readme",
   "scripts": {
     "build": "tsc",
     "prepare": "npm run build",

@@ -1,6 +1,6 @@
 /**
  * CopilotEdge - Production-ready adapter for CopilotKit + Cloudflare Workers AI
- * @author Audrey Klammer
+ * @author Audrey Klammer (@Klammertime)
  * @version 0.1.0
  * @license MIT
  * 

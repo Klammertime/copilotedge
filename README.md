@@ -3,10 +3,10 @@
 > Production-ready adapter connecting CopilotKit to Cloudflare Workers AI - the first of its kind.
 
 [![npm version](https://img.shields.io/npm/v/copilotedge)](https://www.npmjs.com/package/copilotedge)
-[![Tests](https://github.com/audreyklammer/copilotedge/workflows/Tests/badge.svg)](https://github.com/audreyklammer/copilotedge/actions)
-[![License](https://img.shields.io/npm/l/copilotedge)](https://github.com/audreyklammer/copilotedge/blob/main/LICENSE)
+[![Tests](https://github.com/Klammertime/copilotedge/workflows/Tests/badge.svg)](https://github.com/Klammertime/copilotedge/actions)
+[![License](https://img.shields.io/npm/l/copilotedge)](https://github.com/Klammertime/copilotedge/blob/main/LICENSE)
 [![Downloads](https://img.shields.io/npm/dm/copilotedge)](https://www.npmjs.com/package/copilotedge)
-[![Coverage](https://img.shields.io/badge/coverage-80%25-green)](https://github.com/audreyklammer/copilotedge)
+[![Coverage](https://img.shields.io/badge/coverage-80%25-green)](https://github.com/Klammertime/copilotedge)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
 
 ## Why CopilotEdge?
@@ -301,7 +301,7 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ```bash
 # Clone the repo
-git clone https://github.com/audreyklammer/copilotedge.git
+git clone https://github.com/Klammertime/copilotedge.git
 
 # Install dependencies
 pnpm install
@@ -315,13 +315,12 @@ pnpm build
 
 ## License
 
-MIT © [Audrey Klammer](https://github.com/audreyklammer)
+MIT © [Audrey Klammer](https://github.com/Klammertime)
 
 ## Author
 
 **Audrey Klammer**
-- GitHub: [@audreyklammer](https://github.com/audreyklammer)
-- Twitter: [@audreyklammer](https://twitter.com/audreyklammer)
+- GitHub: [@Klammertime](https://github.com/Klammertime)
 
 ## Acknowledgments
 
@@ -336,7 +335,7 @@ MIT © [Audrey Klammer](https://github.com/audreyklammer)
 </p>
 
 <p align="center">
-  <a href="https://github.com/audreyklammer/copilotedge">⭐ Star on GitHub</a> •
+  <a href="https://github.com/Klammertime/copilotedge">⭐ Star on GitHub</a> •
   <a href="https://www.npmjs.com/package/copilotedge">📦 View on npm</a> •
-  <a href="https://github.com/audreyklammer/copilotedge/issues">🐛 Report an Issue</a>
+  <a href="https://github.com/Klammertime/copilotedge/issues">🐛 Report an Issue</a>
 </p>
