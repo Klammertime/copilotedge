@@ -346,6 +346,25 @@ export class CopilotEdge {
   }
 
   /**
+   * Check if messages contain sensitive content
+   */
+  private containsSensitiveContent(messages: any[]): boolean {
+    const patterns = [
+      /api[_-]?key/i,
+      /sk_live_/,
+      /pk_live_/,
+      /bearer\s+/i,
+      /password/i,
+      /secret/i,
+      /token/i
+    ];
+    
+    return messages.some(m => 
+      patterns.some(p => p.test(String(m.content || '')))
+    );
+  }
+
+  /**
    * Handle incoming requests
    */
   public async handleRequest(body: any): Promise<any> {
@@ -597,10 +616,17 @@ export class CopilotEdge {
         const body = await req.json();
         const result = await this.handleRequest(body);
         
+        // Check for sensitive content in the request
+        let containedSensitive = false;
+        if (body.messages && Array.isArray(body.messages)) {
+          containedSensitive = this.containsSensitiveContent(body.messages);
+        }
+        
         return NextResponse.json(result, {
           headers: {
             'X-Powered-By': 'CopilotEdge',
-            'X-Cache': result.cached ? 'HIT' : 'MISS'
+            'X-Cache': result.cached ? 'HIT' : 'MISS',
+            'X-Contained-Sensitive': containedSensitive ? 'true' : 'false'
           }
         });
       } catch (error: any) {

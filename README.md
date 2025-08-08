@@ -9,6 +9,10 @@
 [![Coverage](https://img.shields.io/badge/coverage-80%25-green)](https://github.com/Klammertime/copilotedge)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
 
+## What's New in v0.2.0
+
+**Sensitive Content Detection**: copilotedge now detects when sensitive content (API keys, passwords, tokens) is in your requests and adds an `X-Contained-Sensitive` header. This helps you monitor when sensitive data is being sent to cloud services.
+
 ## Why CopilotEdge?
 
 **The Problem:** CopilotKit is amazing for building AI copilots, but it's designed for OpenAI. Cloudflare Workers AI offers blazing-fast edge inference at 1/10th the cost, but there was no way to connect them... until now.
