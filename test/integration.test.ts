@@ -225,7 +225,7 @@ describe('CopilotEdge Integration Tests', () => {
       let attempts = 0;
       const originalFetch = global.fetch;
       
-      global.fetch = vi.fn().mockImplementation((url) => {
+      global.fetch = vi.fn().mockImplementation((_url) => {
         attempts++;
         if (attempts === 1) {
           return Promise.resolve(new Response('Server Error', { status: 500 }));
@@ -353,8 +353,8 @@ describe('CopilotEdge Integration Tests', () => {
 });
 
 describe('CopilotEdge Next.js Handler', () => {
-  it('should create a valid Next.js handler', () => {
-    const { createCopilotEdgeHandler } = require('../src/index');
+  it('should create a valid Next.js handler', async () => {
+    const { createCopilotEdgeHandler } = await import('../src/index');
     
     const handler = createCopilotEdgeHandler({
       apiKey: 'test-token',

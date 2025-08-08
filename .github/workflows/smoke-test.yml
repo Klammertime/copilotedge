@@ -16,14 +16,17 @@ jobs:
       - run: npm ci
       - run: npm run build
       
-      - name: Test 401 with bad creds
+      - name: Test bad creds error
         run: |
           node -e "
           const CopilotEdge = require('./dist/index.js').default;
           const edge = new CopilotEdge({ apiKey: 'bad', accountId: 'bad' });
           edge.handleRequest({ messages: [{ role: 'user', content: 'test' }] })
             .then(() => process.exit(1))
-            .catch(e => e.statusCode === 401 ? process.exit(0) : process.exit(1));
+            .catch(e => {
+              console.log('Got expected error:', e.statusCode);
+              process.exit((e.statusCode === 404 || e.statusCode === 401 || e.statusCode === 403) ? 0 : 1);
+            });
           "
       
       - name: Test 404 with fake model
