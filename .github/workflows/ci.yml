@@ -26,9 +26,6 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: 'pnpm'
 
-      # pnpm 10 secure mode blocks native builds unless approved
-      - name: Approve build scripts (pnpm secure mode)
-        run: pnpm approve-builds --all
 
       - name: Install
         run: pnpm i --frozen-lockfile
