@@ -19,7 +19,7 @@ jobs:
       - name: Test 401 with bad creds
         run: |
           node -e "
-          import CopilotEdge from './dist/index.js';
+          const CopilotEdge = require('./dist/index.js').default;
           const edge = new CopilotEdge({ apiKey: 'bad', accountId: 'bad' });
           edge.handleRequest({ messages: [{ role: 'user', content: 'test' }] })
             .then(() => process.exit(1))
@@ -32,7 +32,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID || 'test' }}
         run: |
           node -e "
-          import CopilotEdge from './dist/index.js';
+          const CopilotEdge = require('./dist/index.js').default;
           const edge = new CopilotEdge({ 
             apiKey: process.env.CLOUDFLARE_API_TOKEN,
             accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
@@ -56,7 +56,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
           node -e "
-          import CopilotEdge from './dist/index.js';
+          const CopilotEdge = require('./dist/index.js').default;
           const edge = new CopilotEdge({ 
             apiKey: process.env.CLOUDFLARE_API_TOKEN,
             accountId: process.env.CLOUDFLARE_ACCOUNT_ID
