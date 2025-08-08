@@ -293,6 +293,15 @@ while (true) {
 5. **Choose fast models** - Reduce actual processing time
 6. **Consider alternatives** - If streaming is critical, consider other solutions
 
+## Feature Flag Routing
+
+Route based on content characteristics:
+
+```typescript
+const useStreaming = prompt.length > 600 || expectedTokens > 150;
+const url = useStreaming ? "/api/stream" : "/api/copilotedge";
+```
+
 ## When You Need Real Streaming
 
 If streaming is absolutely required for your use case:

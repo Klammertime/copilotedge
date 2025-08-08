@@ -1,0 +1,79 @@
+name: Smoke Tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node }}
+      
+      - run: npm ci
+      - run: npm run build
+      
+      - name: Test 401 with bad creds
+        run: |
+          node -e "
+          import CopilotEdge from './dist/index.js';
+          const edge = new CopilotEdge({ apiKey: 'bad', accountId: 'bad' });
+          edge.handleRequest({ messages: [{ role: 'user', content: 'test' }] })
+            .then(() => process.exit(1))
+            .catch(e => e.statusCode === 401 ? process.exit(0) : process.exit(1));
+          "
+      
+      - name: Test 404 with fake model
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN || 'test' }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID || 'test' }}
+        run: |
+          node -e "
+          import CopilotEdge from './dist/index.js';
+          const edge = new CopilotEdge({ 
+            apiKey: process.env.CLOUDFLARE_API_TOKEN,
+            accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+            model: '@cf/fake/model'
+          });
+          edge.handleRequest({ messages: [{ role: 'user', content: 'test' }] })
+            .then(() => process.exit(1))
+            .catch(e => {
+              if (e.statusCode === 404 && e.message.includes('model')) {
+                console.log('404 correctly returned');
+                process.exit(0);
+              }
+              process.exit(1);
+            });
+          "
+      
+      - name: Test valid request under 2s
+        if: env.CLOUDFLARE_API_TOKEN != 'test'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          node -e "
+          import CopilotEdge from './dist/index.js';
+          const edge = new CopilotEdge({ 
+            apiKey: process.env.CLOUDFLARE_API_TOKEN,
+            accountId: process.env.CLOUDFLARE_ACCOUNT_ID
+          });
+          const start = Date.now();
+          edge.handleRequest({ messages: [{ role: 'user', content: 'Hi' }] })
+            .then(res => {
+              const elapsed = Date.now() - start;
+              if (elapsed > 2000) {
+                console.error('Request took', elapsed, 'ms (>2s)');
+                process.exit(1);
+              }
+              console.log('Request completed in', elapsed, 'ms');
+              process.exit(0);
+            })
+            .catch(e => {
+              console.error(e);
+              process.exit(1);
+            });
+          "

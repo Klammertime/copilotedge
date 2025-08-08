@@ -424,7 +424,18 @@ export class CopilotEdge {
       this.updateMetrics(latency);
       
       if (this.debug) {
-        console.log(`[CopilotEdge] Request completed in ${latency}ms via ${region.name}`);
+        const ttfb = latency;
+        const tokensOut = result.choices?.[0]?.message?.content?.length || 
+                         result.data?.generateCopilotResponse?.messages?.[0]?.content?.[0]?.length || 0;
+        console.log(`[CopilotEdge] Request completed`, {
+          ttfb_ms: ttfb,
+          total_ms: latency,
+          tokens_out: Math.floor(tokensOut / 4),
+          cache_hit: !!cached,
+          model: this.model,
+          abandoned: false,
+          region: region.name
+        });
         this.logMetrics();
       }
       

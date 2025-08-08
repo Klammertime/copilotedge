@@ -67,11 +67,12 @@ export default function Layout({ children }) {
 | [**Configuration**](docs/configuration.md) | All options, defaults, and advanced setup |
 | [**Supported Models**](docs/models.md) | Available models, pricing, and updates |
 | [**Error Handling**](docs/errors.md) | Error types, status codes, and retry strategies |
-| [**Streaming**](docs/streaming.md) | Current status and workarounds |
+| [**Streaming**](docs/streaming.md) | No streaming in v0.2.x. Typical chat p95: 0.8–1.1s with loaders. Long-form uses a separate streaming endpoint (example provided) |
 | [**Security**](docs/security.md) | Best practices and production config |
 | [**Benchmarks**](docs/benchmarks.md) | Performance data and methodology |
 | [**Troubleshooting**](docs/troubleshooting.md) | Common issues and solutions |
 | [**Examples**](docs/examples.md) | Implementation patterns and demos |
+| [**Streaming Worker**](examples/streaming-worker/) | Hybrid SSE streaming example |
 
 ## What's New (v0.2.1)
 

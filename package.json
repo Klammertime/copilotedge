@@ -12,7 +12,9 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "description": "Adapter for connecting CopilotKit to Cloudflare Workers AI with caching and rate limiting",
   "keywords": [
