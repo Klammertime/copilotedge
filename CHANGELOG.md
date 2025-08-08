@@ -5,6 +5,21 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] – 2025-08-08
+
+### Added
+- Deterministic loading UX with staged loaders
+- Typewriter effect for responses under 600 chars
+- CE_FAKE_TYPEWRITER env flag for A/B testing
+- Frontend telemetry with ce:latency events
+- Server-side ttfb_ms metrics in debug mode
+- Streaming worker example for SSE hybrid approach
+- A/B test script for performance testing
+- CI smoke tests for error handling
+
+### Fixed
+- Integration tests now include miniflare dependency
+
 ## [0.2.1] – 2025-08-08
 
 ### Breaking
