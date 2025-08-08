@@ -42,7 +42,7 @@
     "test": "vitest run",
     "test:unit": "vitest run test/unit.test.ts",
     "verify": "./verify.sh",
-    "prepublishOnly": "pnpm build && pnpm test --passWithNoTests && pnpm verify",
+    "prepublishOnly": "pnpm build && pnpm test:unit && pnpm verify",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest watch",
     "test:integration": "vitest run test/integration.test.ts",
