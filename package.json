@@ -40,6 +40,7 @@
     "lint": "eslint . --max-warnings=0",
     "build": "tsc && mkdir -p dist && cp -f src/index.d.ts dist/index.d.ts 2>/dev/null || true",
     "test": "vitest run",
+    "test:unit": "vitest run test/unit.test.ts",
     "verify": "./verify.sh",
     "prepublishOnly": "pnpm build && pnpm test --passWithNoTests && pnpm verify",
     "test:coverage": "vitest run --coverage",

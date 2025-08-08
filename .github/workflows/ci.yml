@@ -37,7 +37,7 @@ jobs:
         run: pnpm run build
 
       - name: Unit tests
-        run: pnpm run test -- --passWithNoTests
+        run: pnpm run test:unit
 
       - name: Verify packaging & examples
         run: pnpm run verify
