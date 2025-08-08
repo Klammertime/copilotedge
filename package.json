@@ -10,9 +10,18 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "description": "Connect CopilotKit to Cloudflare Workers AI",
-  "keywords": ["copilotkit", "cloudflare", "ai", "edge", "workers"],
+  "keywords": [
+    "copilotkit",
+    "cloudflare",
+    "ai",
+    "edge",
+    "workers"
+  ],
   "author": "Klammertime",
   "license": "MIT",
   "repository": {
@@ -24,7 +33,7 @@
   },
   "homepage": "https://github.com/Klammertime/copilotedge#readme",
   "scripts": {
-    "build": "tsc",
+    "build": "node node_modules/typescript/lib/_tsc.js",
     "prepare": "npm run build",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -36,12 +45,12 @@
     "next": ">=13.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
     "@types/node": "^20.0.0",
-    "vitest": "^1.2.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
     "@vitest/coverage-v8": "^1.2.0",
     "eslint": "^8.56.0",
-    "@typescript-eslint/eslint-plugin": "^6.19.0",
-    "@typescript-eslint/parser": "^6.19.0"
+    "typescript": "^5.9.2",
+    "vitest": "^1.2.0"
   }
 }
