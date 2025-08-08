@@ -1,6 +1,6 @@
 {
   "name": "copilotedge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -14,13 +14,15 @@
     "dist",
     "README.md"
   ],
-  "description": "Connect CopilotKit to Cloudflare Workers AI",
+  "description": "Adapter for connecting CopilotKit to Cloudflare Workers AI with caching and rate limiting",
   "keywords": [
     "copilotkit",
     "cloudflare",
-    "ai",
-    "edge",
-    "workers"
+    "workers-ai",
+    "edge-computing",
+    "llm",
+    "adapter",
+    "cache"
   ],
   "author": "Klammertime",
   "license": "MIT",
@@ -38,6 +40,7 @@
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest watch",
+    "test:integration": "vitest run test/integration.test.ts",
     "lint": "eslint src test --ext .ts",
     "typecheck": "tsc --noEmit"
   },
@@ -50,6 +53,7 @@
     "@typescript-eslint/parser": "^6.19.0",
     "@vitest/coverage-v8": "^1.2.0",
     "eslint": "^8.56.0",
+    "miniflare": "^3.0.0",
     "typescript": "^5.9.2",
     "vitest": "^1.2.0"
   }

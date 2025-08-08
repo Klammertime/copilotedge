@@ -1,7 +1,7 @@
 /**
  * CopilotEdge - Production-ready adapter for CopilotKit + Cloudflare Workers AI
  * @author Audrey Klammer (@Klammertime)
- * @version 0.1.0
+ * @version 0.2.1
  * @license MIT
  * 
  * Features:
@@ -34,6 +34,8 @@ export interface CopilotEdgeConfig {
   maxRetries?: number;
   /** Rate limit per minute (default: 60) */
   rateLimit?: number;
+  /** DANGER: Enable internal sensitive content logging. DO NOT use in production! (default: false) */
+  enableInternalSensitiveLogging?: boolean;
 }
 
 /**
@@ -86,6 +88,7 @@ export class CopilotEdge {
     errors: number;
     avgLatency: number[];
   };
+  private enableInternalSensitiveLogging: boolean;
 
   constructor(config: CopilotEdgeConfig = {}) {
     // Validate and set configuration
@@ -96,6 +99,7 @@ export class CopilotEdge {
     this.cacheTimeout = config.cacheTimeout || 60000; // 60 seconds
     this.maxRetries = config.maxRetries || 3;
     this.rateLimit = config.rateLimit || 60; // requests per minute
+    this.enableInternalSensitiveLogging = config.enableInternalSensitiveLogging || false;
     
     // Validate required fields
     if (!this.apiToken) {
@@ -132,7 +136,8 @@ export class CopilotEdge {
         model: this.model,
         cacheTimeout: this.cacheTimeout,
         maxRetries: this.maxRetries,
-        rateLimit: this.rateLimit
+        rateLimit: this.rateLimit,
+        enableInternalSensitiveLogging: this.enableInternalSensitiveLogging
       });
     }
   }
@@ -347,8 +352,13 @@ export class CopilotEdge {
 
   /**
    * Check if messages contain sensitive content
+   * WARNING: This should only be used for internal monitoring, never exposed to clients
    */
   private containsSensitiveContent(messages: any[]): boolean {
+    if (!this.enableInternalSensitiveLogging) {
+      return false; // Feature disabled by default for security
+    }
+    
     const patterns = [
       /api[_-]?key/i,
       /sk_live_/,
@@ -356,7 +366,8 @@ export class CopilotEdge {
       /bearer\s+/i,
       /password/i,
       /secret/i,
-      /token/i
+      /token/i,
+      /\b[A-Za-z0-9]{32,}\b/ // Long random strings that might be keys
     ];
     
     return messages.some(m => 
@@ -366,6 +377,7 @@ export class CopilotEdge {
 
   /**
    * Handle incoming requests
+   * NOTE: Streaming is NOT supported. All responses are returned complete.
    */
   public async handleRequest(body: any): Promise<any> {
     const start = performance.now();
@@ -616,17 +628,20 @@ export class CopilotEdge {
         const body = await req.json();
         const result = await this.handleRequest(body);
         
-        // Check for sensitive content in the request
-        let containedSensitive = false;
-        if (body.messages && Array.isArray(body.messages)) {
-          containedSensitive = this.containsSensitiveContent(body.messages);
+        // Check for sensitive content (only for internal logging, NEVER exposed to clients)
+        if (this.enableInternalSensitiveLogging && body.messages && Array.isArray(body.messages)) {
+          const containedSensitive = this.containsSensitiveContent(body.messages);
+          if (containedSensitive && this.debug) {
+            console.warn('[CopilotEdge] WARNING: Potentially sensitive content detected in request');
+            // Log to internal monitoring but NEVER expose to client headers
+          }
         }
         
         return NextResponse.json(result, {
           headers: {
             'X-Powered-By': 'CopilotEdge',
-            'X-Cache': result.cached ? 'HIT' : 'MISS',
-            'X-Contained-Sensitive': containedSensitive ? 'true' : 'false'
+            'X-Cache': result.cached ? 'HIT' : 'MISS'
+            // Removed X-Contained-Sensitive header for security
           }
         });
       } catch (error: any) {

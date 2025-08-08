@@ -5,6 +5,42 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-08-08
+
+### Breaking Changes
+- **Security**: `X-Contained-Sensitive` header removed from responses for security reasons
+- **Security**: Sensitive content detection now disabled by default (opt-in via `detectSensitiveContent` config)
+
+### Added
+- Support for new OpenAI open-weight models (gpt-oss-120b, gpt-oss-20b) - August 2025 release
+- Support for Llama 3.3, Mistral Small 2503, and Gemma 3 models
+- Comprehensive benchmarks documentation with methodology (`benchmarks.md`)
+- Detailed error mapping with status codes and retry guidance
+- Security & Privacy section with best practices
+- Cloudflare Pages Functions deployment example
+- Integration tests using Miniflare
+- Model update strategy documentation
+- Explicit streaming support documentation (not currently supported)
+
+### Changed
+- Removed unsubstantiated "7× faster / 90% cheaper" claims - replaced with methodology
+- Updated model list to reflect August 2025 availability
+- Toned down marketing language throughout README
+- Improved error handling documentation with failure scenarios
+- Enhanced configuration examples with security recommendations
+- Updated pricing to reflect current Cloudflare pricing ($0.011/1k neurons)
+
+### Fixed
+- Sensitive content detection security vulnerability (no longer exposed in headers)
+- Marketing claims now properly substantiated with methodology
+- Model pricing updated to current rates
+
+### Documentation
+- Added recommended production configuration
+- Added model deprecation handling examples
+- Added cache effectiveness guidance
+- Added performance testing instructions
+
 ## [0.2.0] - 2025-01-31
 
 ### Added
