@@ -1,0 +1,11 @@
+dist/
+docs/
+examples/
+coverage/
+*.tgz
+node_modules/
+.git/
+*.md
+*.json
+*.yml
+*.yaml

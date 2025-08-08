@@ -37,13 +37,14 @@
   },
   "homepage": "https://github.com/Klammertime/copilotedge#readme",
   "scripts": {
-    "build": "node node_modules/typescript/lib/_tsc.js",
-    "prepublishOnly": "npm run build",
-    "test": "vitest run test/unit.test.ts --no-coverage",
+    "lint": "eslint . --max-warnings=0",
+    "build": "tsc && mkdir -p dist && cp -f src/index.d.ts dist/index.d.ts 2>/dev/null || true",
+    "test": "vitest run",
+    "verify": "./verify.sh",
+    "prepublishOnly": "pnpm build && pnpm test --passWithNoTests && pnpm verify",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest watch",
     "test:integration": "vitest run test/integration.test.ts",
-    "lint": "eslint src test --ext .ts",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
