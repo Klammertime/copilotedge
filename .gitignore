@@ -42,3 +42,6 @@ lerna-debug.log*
 tmp/
 temp/
 *.tmp
+
+# NPM package output
+*.tgz
