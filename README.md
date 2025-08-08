@@ -3,7 +3,7 @@
 Adapter connecting [CopilotKit](https://github.com/CopilotKit/CopilotKit) to [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/) for edge-based inference.
 
 [![npm version](https://img.shields.io/npm/v/copilotedge)](https://www.npmjs.com/package/copilotedge)
-[![Tests](https://github.com/Klammertime/copilotedge/workflows/Tests/badge.svg)](https://github.com/Klammertime/copilotedge/actions)
+[![CI](https://github.com/Klammertime/copilotedge/actions/workflows/ci.yml/badge.svg)](https://github.com/Klammertime/copilotedge/actions/workflows/ci.yml)
 [![License](https://img.shields.io/npm/l/copilotedge)](https://github.com/Klammertime/copilotedge/blob/main/LICENSE)
 [![Downloads](https://img.shields.io/npm/dm/copilotedge)](https://www.npmjs.com/package/copilotedge)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
