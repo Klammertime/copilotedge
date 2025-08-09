@@ -5,26 +5,37 @@ Complete guide to configuring CopilotEdge for your needs.
 ## Basic Configuration
 
 ```typescript
-import { createCopilotEdgeHandler } from 'copilotedge';
+import { createCopilotEdgeHandler } from "copilotedge";
 
+// Basic setup with defaults
 const handler = createCopilotEdgeHandler({
   apiKey: process.env.CLOUDFLARE_API_TOKEN,
-  accountId: process.env.CLOUDFLARE_ACCOUNT_ID
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+});
+
+// With OpenAI model and fallback
+const reliableHandler = createCopilotEdgeHandler({
+  apiKey: process.env.CLOUDFLARE_API_TOKEN,
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+  model: "@cf/openai/gpt-120b",
+  fallback: "@cf/meta/llama-3.1-8b-instruct",
 });
 ```
 
 ## Configuration Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `apiKey` | `string` | Required | Cloudflare API token |
-| `accountId` | `string` | Required | Cloudflare account ID |
-| `model` | `string` | `@cf/meta/llama-3.1-8b-instruct` | AI model to use |
-| `debug` | `boolean` | `false` | Enable debug logging |
-| `cacheTimeout` | `number` | `60000` | Cache TTL in milliseconds |
-| `maxRetries` | `number` | `3` | Maximum retry attempts |
-| `rateLimit` | `number` | `60` | Requests per minute limit |
-| `enableInternalSensitiveLogging` | `boolean` | `false` | **DANGER**: Never use in production |
+| Option                           | Type      | Default                          | Description                              |
+| -------------------------------- | --------- | -------------------------------- | ---------------------------------------- |
+| `apiKey`                         | `string`  | Required                         | Cloudflare API token                     |
+| `accountId`                      | `string`  | Required                         | Cloudflare account ID                    |
+| `model`                          | `string`  | `@cf/meta/llama-3.1-8b-instruct` | AI model to use                          |
+| `provider`                       | `string`  | `cloudflare`                     | AI provider to use                       |
+| `fallback`                       | `string`  | `null`                           | Optional fallback model if primary fails |
+| `debug`                          | `boolean` | `false`                          | Enable debug logging                     |
+| `cacheTimeout`                   | `number`  | `60000`                          | Cache TTL in milliseconds                |
+| `maxRetries`                     | `number`  | `3`                              | Maximum retry attempts                   |
+| `rateLimit`                      | `number`  | `60`                             | Requests per minute limit                |
+| `enableInternalSensitiveLogging` | `boolean` | `false`                          | **DANGER**: Never use in production      |
 
 ## Environment Variables
 
@@ -39,6 +50,7 @@ NODE_ENV=development  # Enables debug mode when set to 'development'
 ## Caching Configuration
 
 ### Default Behavior
+
 - Cache TTL: 60 seconds
 - LRU eviction when cache exceeds 100 entries
 - Cache key based on request hash
@@ -49,7 +61,7 @@ NODE_ENV=development  # Enables debug mode when set to 'development'
 const handler = createCopilotEdgeHandler({
   apiKey: process.env.CLOUDFLARE_API_TOKEN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-  cacheTimeout: 120000  // 2 minutes
+  cacheTimeout: 120000, // 2 minutes
 });
 ```
 
@@ -57,13 +69,14 @@ const handler = createCopilotEdgeHandler({
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  cacheTimeout: 0  // Disables caching
+  cacheTimeout: 0, // Disables caching
 });
 ```
 
 ## Retry Configuration
 
 ### Default Behavior
+
 - Max retries: 3
 - Exponential backoff with jitter
 - Max delay: 8 seconds
@@ -73,13 +86,14 @@ const handler = createCopilotEdgeHandler({
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  maxRetries: 5  // More aggressive retrying
+  maxRetries: 5, // More aggressive retrying
 });
 ```
 
 ## Rate Limiting
 
 ### Default Behavior
+
 - 60 requests per minute per client
 - Returns 429 status when exceeded
 - Sliding window implementation
@@ -88,7 +102,7 @@ const handler = createCopilotEdgeHandler({
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  rateLimit: 120  // Allow 120 requests per minute
+  rateLimit: 120, // Allow 120 requests per minute
 });
 ```
 
@@ -96,7 +110,7 @@ const handler = createCopilotEdgeHandler({
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  rateLimit: 30  // More conservative for production
+  rateLimit: 30, // More conservative for production
 });
 ```
 
@@ -106,7 +120,7 @@ const handler = createCopilotEdgeHandler({
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  debug: true
+  debug: true,
 });
 ```
 
@@ -133,12 +147,12 @@ const handler = createCopilotEdgeHandler({
 const handler = createCopilotEdgeHandler({
   apiKey: process.env.CLOUDFLARE_API_TOKEN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-  model: '@cf/meta/llama-3.1-8b-instruct',
-  debug: false,                           // Never true in production
-  enableInternalSensitiveLogging: false,  // Never true in production
-  cacheTimeout: 30000,                    // 30s for fresher responses
-  maxRetries: 2,                          // Less aggressive retrying
-  rateLimit: 30                           // Conservative rate limit
+  model: "@cf/meta/llama-3.1-8b-instruct",
+  debug: false, // Never true in production
+  enableInternalSensitiveLogging: false, // Never true in production
+  cacheTimeout: 30000, // 30s for fresher responses
+  maxRetries: 2, // Less aggressive retrying
+  rateLimit: 30, // Conservative rate limit
 });
 ```
 
@@ -151,24 +165,45 @@ const handler = createCopilotEdgeHandler({
 const chatHandler = createCopilotEdgeHandler({
   apiKey: process.env.CLOUDFLARE_API_TOKEN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-  model: '@cf/meta/llama-3.1-8b-instruct'
+  model: "@cf/meta/llama-3.1-8b-instruct",
 });
 
 const codeHandler = createCopilotEdgeHandler({
   apiKey: process.env.CLOUDFLARE_API_TOKEN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-  model: '@cf/openai/gpt-oss-20b'  // Better for code
+  model: "@cf/openai/gpt-oss-20b", // Better for code
 });
 ```
+
+### Model Fallbacks
+
+```typescript
+// Configure with model fallback for reliability
+const handler = createCopilotEdgeHandler({
+  apiKey: process.env.CLOUDFLARE_API_TOKEN,
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+  model: "@cf/openai/gpt-oss-120b", // Try OpenAI's 120B model first
+  fallback: "@cf/meta/llama-3.1-8b-instruct", // Fall back to Llama if needed
+});
+```
+
+When a fallback model is specified, CopilotEdge will:
+
+1. Always try the primary model first
+2. If the primary model fails (404 or 429), it switches to the fallback model
+3. The switch happens transparently with no client-side code changes needed
+4. Metrics will track when fallbacks were used
 
 ### Direct Class Usage
 
 ```typescript
-import CopilotEdge from 'copilotedge';
+import CopilotEdge from "copilotedge";
 
 const edge = new CopilotEdge({
   apiKey: process.env.CLOUDFLARE_API_TOKEN,
-  accountId: process.env.CLOUDFLARE_ACCOUNT_ID
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+  model: "@cf/openai/gpt-oss-120b",
+  fallback: "@cf/meta/llama-3.1-8b-instruct",
 });
 
 // Handle request manually
@@ -176,7 +211,8 @@ const response = await edge.handleRequest(body);
 
 // Get metrics
 const metrics = edge.getMetrics();
-console.log('Cache hit rate:', metrics.cacheHitRate);
+console.log("Cache hit rate:", metrics.cacheHitRate);
+console.log("Fallback usage rate:", metrics.fallbackRate);
 
 // Clear cache
 edge.clearCache();
@@ -188,7 +224,7 @@ await edge.testFeatures();
 ### Custom Error Handling
 
 ```typescript
-import { CopilotEdge, ValidationError, APIError } from 'copilotedge';
+import { CopilotEdge, ValidationError, APIError } from "copilotedge";
 
 const edge = new CopilotEdge(config);
 
@@ -198,7 +234,7 @@ try {
 } catch (error) {
   if (error instanceof ValidationError) {
     // Handle validation errors (400)
-    console.error('Invalid request:', error.message);
+    console.error("Invalid request:", error.message);
   } else if (error instanceof APIError) {
     // Handle API errors
     if (error.statusCode === 429) {
@@ -225,9 +261,9 @@ Invalid configuration will throw a `ValidationError` immediately.
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  cacheTimeout: 120000,  // Longer cache
-  maxRetries: 1,         // Fail fast
-  model: '@cf/openai/gpt-oss-20b'  // Faster model
+  cacheTimeout: 120000, // Longer cache
+  maxRetries: 1, // Fail fast
+  model: "@cf/openai/gpt-oss-20b", // Faster model
 });
 ```
 
@@ -235,9 +271,11 @@ const handler = createCopilotEdgeHandler({
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  maxRetries: 5,         // More retries
-  rateLimit: 30,         // Conservative limit
-  cacheTimeout: 30000    // Shorter cache for freshness
+  maxRetries: 5, // More retries
+  rateLimit: 30, // Conservative limit
+  cacheTimeout: 30000, // Shorter cache for freshness
+  model: "@cf/openai/gpt-oss-120b", // Primary model
+  fallback: "@cf/meta/llama-3.1-8b-instruct", // Reliable fallback
 });
 ```
 
@@ -245,7 +283,7 @@ const handler = createCopilotEdgeHandler({
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  cacheTimeout: 300000,  // 5 minute cache
-  model: '@cf/meta/llama-3.1-8b-instruct'  // Efficient model
+  cacheTimeout: 300000, // 5 minute cache
+  model: "@cf/meta/llama-3.1-8b-instruct", // Efficient model
 });
 ```

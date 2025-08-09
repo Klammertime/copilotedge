@@ -16,6 +16,8 @@ Adapter connecting [CopilotKit](https://github.com/CopilotKit/CopilotKit) to [Cl
 - **Rate Limiting** - Configurable limits to prevent abuse
 - **Type Safe** - Full TypeScript support with comprehensive types
 - **Zero Dependencies** - Lightweight, ~38KB total
+- **OpenAI Models** - Support for OpenAI's 120B and 20B models on Cloudflare
+- **Model Fallbacks** - Automatic fallback to alternative models if primary is unavailable
 
 ## Quick Start
 
@@ -43,26 +45,31 @@ CLOUDFLARE_ACCOUNT_ID=your-account-id-here
 
 ```typescript
 // app/api/copilotedge/route.ts (Next.js App Router)
-import { createCopilotEdgeHandler } from 'copilotedge';
+import { createCopilotEdgeHandler } from "copilotedge";
 
+// Basic setup
 export const POST = createCopilotEdgeHandler({
   apiKey: process.env.CLOUDFLARE_API_TOKEN,
-  accountId: process.env.CLOUDFLARE_ACCOUNT_ID
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
 });
+
+// With OpenAI model and fallback
+// export const POST = createCopilotEdgeHandler({
+//   apiKey: process.env.CLOUDFLARE_API_TOKEN,
+//   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+//   model: '@cf/openai/gpt-oss-120b',           // OpenAI's 120B parameter model
+//   fallback: '@cf/meta/llama-3.1-8b-instruct'  // Fallback model
+// });
 ```
 
 ### 4. Configure CopilotKit
 
 ```tsx
 // app/layout.tsx
-import { CopilotKit } from '@copilotkit/react-core';
+import { CopilotKit } from "@copilotkit/react-core";
 
 export default function Layout({ children }) {
-  return (
-    <CopilotKit runtimeUrl="/api/copilotedge">
-      {children}
-    </CopilotKit>
-  );
+  return <CopilotKit runtimeUrl="/api/copilotedge">{children}</CopilotKit>;
 }
 ```
 
@@ -74,17 +81,17 @@ export default function Layout({ children }) {
 
 ## Documentation
 
-| Topic | Description |
-|-------|-------------|
-| [**Configuration**](docs/configuration.md) | All options, defaults, and advanced setup |
-| [**Supported Models**](docs/models.md) | Available models, pricing, and updates |
-| [**Error Handling**](docs/errors.md) | Error types, status codes, and retry strategies |
-| [**Streaming**](docs/streaming.md) | No streaming in v0.2.x. Typical chat p95: 0.8–1.1s with loaders. Long-form uses a separate streaming endpoint (example provided) |
-| [**Security**](docs/security.md) | Best practices and production config |
-| [**Benchmarks**](docs/benchmarks.md) | Performance data and methodology |
-| [**Troubleshooting**](docs/troubleshooting.md) | Common issues and solutions |
-| [**Examples**](docs/examples.md) | Implementation patterns and demos |
-| [**Streaming Worker**](examples/streaming-worker/) | Hybrid SSE streaming example |
+| Topic                                              | Description                                                                                                                      |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| [**Configuration**](docs/configuration.md)         | All options, defaults, and advanced setup                                                                                        |
+| [**Supported Models**](docs/models.md)             | Available models, pricing, and updates                                                                                           |
+| [**Error Handling**](docs/errors.md)               | Error types, status codes, and retry strategies                                                                                  |
+| [**Streaming**](docs/streaming.md)                 | No streaming in v0.2.x. Typical chat p95: 0.8–1.1s with loaders. Long-form uses a separate streaming endpoint (example provided) |
+| [**Security**](docs/security.md)                   | Best practices and production config                                                                                             |
+| [**Benchmarks**](docs/benchmarks.md)               | Performance data and methodology                                                                                                 |
+| [**Troubleshooting**](docs/troubleshooting.md)     | Common issues and solutions                                                                                                      |
+| [**Examples**](docs/examples.md)                   | Implementation patterns and demos                                                                                                |
+| [**Streaming Worker**](examples/streaming-worker/) | Hybrid SSE streaming example                                                                                                     |
 
 See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
@@ -96,14 +103,16 @@ Creates a Next.js API route handler.
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  apiKey: string,              // Required
-  accountId: string,           // Required
-  model?: string,              // Default: '@cf/meta/llama-3.1-8b-instruct'
-  debug?: boolean,             // Default: false
-  cacheTimeout?: number,       // Default: 60000 (ms)
-  maxRetries?: number,         // Default: 3
-  rateLimit?: number,          // Default: 60 (requests/min)
-  enableInternalSensitiveLogging?: boolean // DANGER: See docs/security.md
+  apiKey: string, // Required
+  accountId: string, // Required
+  model: string, // Default: '@cf/meta/llama-3.1-8b-instruct'
+  provider: string, // Default: 'cloudflare'
+  fallback: string, // Optional fallback model
+  debug: boolean, // Default: false
+  cacheTimeout: number, // Default: 60000 (ms)
+  maxRetries: number, // Default: 3
+  rateLimit: number, // Default: 60 (requests/min)
+  enableInternalSensitiveLogging: boolean, // DANGER: See docs/security.md
 });
 ```
 
@@ -114,7 +123,7 @@ See [Configuration](docs/configuration.md) for detailed options.
 For advanced use cases:
 
 ```typescript
-import CopilotEdge from 'copilotedge';
+import CopilotEdge from "copilotedge";
 
 const edge = new CopilotEdge(config);
 const response = await edge.handleRequest(body);

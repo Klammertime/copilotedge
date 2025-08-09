@@ -44,3 +44,7 @@ temp/
 
 # NPM package output
 *.tgz
+
+# Dev notes
+New_Research.md
+cloudflare-copilotkit-known-issues.md

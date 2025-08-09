@@ -24,8 +24,21 @@ export interface CopilotEdgeConfig {
   apiKey?: string;
   /** Cloudflare account ID (or set CLOUDFLARE_ACCOUNT_ID env var) */
   accountId?: string;
-  /** AI model to use (defaults to Llama 3.1 8B) */
+  /** 
+   * AI model to use (defaults to Llama 3.1 8B)
+   * @deprecated Use provider and model configuration instead for more flexibility
+   */
   model?: string;
+  /** 
+   * AI provider to use 
+   * @default 'cloudflare'
+   */
+  provider?: string;
+  /** 
+   * Fallback model to use if the primary model fails 
+   * For example: '@cf/meta/llama-3.1-8b-instruct'
+   */
+  fallback?: string;
   /** Enable debug logging */
   debug?: boolean;
   /** 
@@ -113,7 +126,16 @@ export class APIError extends Error {
  * Default configuration values for CopilotEdge.
  */
 const DEFAULTS = {
+  PROVIDER: 'cloudflare',
   MODEL: '@cf/meta/llama-3.1-8b-instruct',
+  OPENAI_MODELS: {
+    '120b': '@cf/openai/gpt-oss-120b',
+    '20b': '@cf/openai/gpt-oss-20b'
+  },
+  META_MODELS: {
+    '70b': '@cf/meta/llama-3.1-70b',
+    '8b': '@cf/meta/llama-3.1-8b-instruct'
+  },
   CACHE_TIMEOUT: 60000, // 60 seconds
   MAX_RETRIES: 3,
   RATE_LIMIT: 60, // per minute
@@ -183,6 +205,8 @@ export class CopilotEdge {
   private apiToken: string;
   private accountId: string;
   private model: string;
+  private fallbackModel: string | null;
+  private provider: string;
   private debug: boolean;
   private cache: Map<string, { data: any; timestamp: number }>;
   private cacheLocks: Map<string, Promise<any>>;
@@ -204,8 +228,10 @@ export class CopilotEdge {
     cacheHits: number;
     errors: number;
     avgLatency: number[];
+    fallbackUsed: number;
   };
   private enableInternalSensitiveLogging: boolean;
+  private isFallbackActive: boolean = false;
 
   /**
    * Creates an instance of CopilotEdge.
@@ -215,7 +241,23 @@ export class CopilotEdge {
     // Validate and set configuration
     this.apiToken = config.apiKey || process.env.CLOUDFLARE_API_TOKEN || '';
     this.accountId = config.accountId || process.env.CLOUDFLARE_ACCOUNT_ID || '';
-    this.model = config.model || DEFAULTS.MODEL;
+    this.provider = config.provider || DEFAULTS.PROVIDER;
+    
+    // Handle model configuration with provider and fallback support
+    if (config.model) {
+      // Support legacy model configuration
+      this.model = config.model;
+    } else if (this.provider === 'cloudflare' && config.model?.includes('@cf/openai/')) {
+      // Direct OpenAI model reference
+      this.model = config.model;
+    } else {
+      // Use default model
+      this.model = DEFAULTS.MODEL;
+    }
+    
+    // Set fallback model if provided
+    this.fallbackModel = config.fallback || null;
+    
     this.debug = config.debug || process.env.NODE_ENV === 'development';
     this.cacheTimeout = config.cacheTimeout || DEFAULTS.CACHE_TIMEOUT;
     this.maxRetries = config.maxRetries || DEFAULTS.MAX_RETRIES;
@@ -258,12 +300,15 @@ export class CopilotEdge {
       totalRequests: 0,
       cacheHits: 0,
       errors: 0,
-      avgLatency: []
+      avgLatency: [],
+      fallbackUsed: 0
     };
     
     if (this.debug) {
       console.log('[CopilotEdge] Initialized with:', {
         model: this.model,
+        provider: this.provider,
+        fallbackModel: this.fallbackModel,
         cacheTimeout: this.cacheTimeout,
         maxRetries: this.maxRetries,
         rateLimit: this.rateLimit,
@@ -771,6 +816,10 @@ export class CopilotEdge {
   private async callCloudflareAI(messages: any[], region: Region): Promise<string> {
     const baseURL = `${region.url}/client/v4/accounts/${this.accountId}/ai/v1`;
     
+    // If we've already tried the primary model and it failed,
+    // use the fallback model if available
+    const activeModel = this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model;
+    
     try {
       const response = await this.fetch(`${baseURL}/chat/completions`, {
         method: 'POST',
@@ -779,7 +828,7 @@ export class CopilotEdge {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: this.model,
+          model: activeModel,
           messages: messages,
           temperature: 0.7,
           max_tokens: 1000,
@@ -790,6 +839,25 @@ export class CopilotEdge {
 
       if (!response.ok) {
         const error = await response.text();
+        
+        // If we get a 404 (model not found) or a 429 (rate limit exceeded),
+        // and we have a fallback model, and we haven't tried the fallback yet,
+        // switch to the fallback model and retry
+        if ((response.status === 404 || response.status === 429) && 
+            this.fallbackModel && 
+            !this.isFallbackActive) {
+          
+          if (this.debug) {
+            console.log(`[CopilotEdge] Model ${activeModel} unavailable, falling back to ${this.fallbackModel}`);
+          }
+          
+          this.isFallbackActive = true;
+          this.metrics.fallbackUsed++;
+          
+          // Retry with fallback model
+          return await this.callCloudflareAI(messages, region);
+        }
+        
         throw new APIError(
           `Cloudflare AI error: ${error}`,
           response.status
@@ -804,12 +872,14 @@ export class CopilotEdge {
     
       return data.choices[0].message.content;
     } catch (error) {
-      // If the fastest region fails, reset and retry region selection
-      if (this.debug) {
-        console.log(`[CopilotEdge] Region ${region.name} failed, re-evaluating...`);
+      // If error is not API related, reset region selection
+      if (!(error instanceof APIError)) {
+        if (this.debug) {
+          console.log(`[CopilotEdge] Region ${region.name} failed, re-evaluating...`);
+        }
+        this.fastestRegion = null;
+        this.lastRegionCheck = 0;
       }
-      this.fastestRegion = null;
-      this.lastRegionCheck = 0;
       throw error;
     }
   }
@@ -863,11 +933,18 @@ export class CopilotEdge {
       ? Math.round((this.metrics.cacheHits / this.metrics.totalRequests) * 100)
       : 0;
     
+    const fallbackRate = this.metrics.totalRequests > 0
+      ? Math.round((this.metrics.fallbackUsed / this.metrics.totalRequests) * 100)
+      : 0;
+    
     console.log('[CopilotEdge] Metrics:', {
       totalRequests: this.metrics.totalRequests,
       cacheHitRate: `${cacheRate}%`,
       avgLatency: `${avg}ms`,
-      errors: this.metrics.errors
+      errors: this.metrics.errors,
+      fallbackUsed: this.metrics.fallbackUsed,
+      fallbackRate: `${fallbackRate}%`,
+      activeModel: this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model
     });
   }
 
@@ -933,7 +1010,11 @@ export class CopilotEdge {
       avgLatency: avg,
       errors: this.metrics.errors,
       errorRate: this.metrics.totalRequests > 0
-        ? (this.metrics.errors / this.metrics.totalRequests) : 0
+        ? (this.metrics.errors / this.metrics.totalRequests) : 0,
+      fallbackUsed: this.metrics.fallbackUsed,
+      fallbackRate: this.metrics.totalRequests > 0
+        ? (this.metrics.fallbackUsed / this.metrics.totalRequests) : 0,
+      activeModel: this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model
     };
   }
 
@@ -959,7 +1040,9 @@ export class CopilotEdge {
     console.log('\n✅ Configuration');
     console.log('  API Token:', this.apiToken ? 'Set' : '❌ Missing');
     console.log('  Account ID:', this.accountId ? 'Set' : '❌ Missing');
+    console.log('  Provider:', this.provider);
     console.log('  Model:', this.model);
+    console.log('  Fallback:', this.fallbackModel || 'None');
     console.log('  Debug:', this.debug ? 'ON' : 'OFF');
     
     // 2. Region selection
@@ -984,6 +1067,7 @@ export class CopilotEdge {
     console.log('\n✅ Retry Logic');
     console.log('  Max retries:', this.maxRetries);
     console.log('  Backoff: Exponential with jitter');
+    console.log('  Fallback:', this.fallbackModel ? 'Enabled' : 'Disabled');
     
     // 6. Metrics
     console.log('\n✅ Performance Metrics');
