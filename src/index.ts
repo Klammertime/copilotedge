@@ -305,15 +305,25 @@ export class CopilotEdge {
     };
     
     if (this.debug) {
-      console.log('[CopilotEdge] Initialized with:', {
-        model: this.model,
+      // For production safety, create a separate log object that limits sensitive info
+      const isProduction = process.env.NODE_ENV === 'production';
+      const logConfig = {
+        // In production, only log generic model info, not specific models
+        model: isProduction ? (this.model.includes('/') ? 'custom-model' : this.model) : this.model,
         provider: this.provider,
-        fallbackModel: this.fallbackModel,
+        fallbackModel: isProduction ? (this.fallbackModel ? 'configured' : 'none') : this.fallbackModel,
         cacheTimeout: this.cacheTimeout,
         maxRetries: this.maxRetries,
         rateLimit: this.rateLimit,
         enableInternalSensitiveLogging: this.enableInternalSensitiveLogging
-      });
+      };
+      
+      console.log('[CopilotEdge] Initialized with:', logConfig);
+      
+      // Add a warning when debug mode is enabled in production
+      if (isProduction) {
+        console.warn('[CopilotEdge] WARNING: Debug mode is enabled in production environment. This may impact performance.');
+      }
     }
   }
 
@@ -848,7 +858,13 @@ export class CopilotEdge {
             !this.isFallbackActive) {
           
           if (this.debug) {
-            console.log(`[CopilotEdge] Model ${activeModel} unavailable, falling back to ${this.fallbackModel}`);
+            const isProduction = process.env.NODE_ENV === 'production';
+            // In production, don't log specific model names
+            if (isProduction) {
+              console.log(`[CopilotEdge] Primary model unavailable, using fallback model`);
+            } else {
+              console.log(`[CopilotEdge] Model ${activeModel} unavailable, falling back to ${this.fallbackModel}`);
+            }
           }
           
           this.isFallbackActive = true;
@@ -937,15 +953,22 @@ export class CopilotEdge {
       ? Math.round((this.metrics.fallbackUsed / this.metrics.totalRequests) * 100)
       : 0;
     
-    console.log('[CopilotEdge] Metrics:', {
+    const isProduction = process.env.NODE_ENV === 'production';
+    
+    const metricsLog = {
       totalRequests: this.metrics.totalRequests,
       cacheHitRate: `${cacheRate}%`,
       avgLatency: `${avg}ms`,
       errors: this.metrics.errors,
       fallbackUsed: this.metrics.fallbackUsed,
       fallbackRate: `${fallbackRate}%`,
-      activeModel: this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model
-    });
+      // In production, only indicate if using primary or fallback, not specific model names
+      activeModel: isProduction 
+        ? (this.isFallbackActive ? 'fallback-model' : 'primary-model') 
+        : (this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model)
+    };
+    
+    console.log('[CopilotEdge] Metrics:', metricsLog);
   }
 
   /**
@@ -1041,8 +1064,17 @@ export class CopilotEdge {
     console.log('  API Token:', this.apiToken ? 'Set' : '❌ Missing');
     console.log('  Account ID:', this.accountId ? 'Set' : '❌ Missing');
     console.log('  Provider:', this.provider);
-    console.log('  Model:', this.model);
-    console.log('  Fallback:', this.fallbackModel || 'None');
+    
+    // Apply production safeguards to model information
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction) {
+      console.log('  Model:', this.model.includes('/') ? 'custom-model' : this.model);
+      console.log('  Fallback:', this.fallbackModel ? 'Configured' : 'None');
+    } else {
+      console.log('  Model:', this.model);
+      console.log('  Fallback:', this.fallbackModel || 'None');
+    }
+    
     console.log('  Debug:', this.debug ? 'ON' : 'OFF');
     
     // 2. Region selection
