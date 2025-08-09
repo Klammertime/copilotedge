@@ -21,13 +21,25 @@ Adapter connecting [CopilotKit](https://github.com/CopilotKit/CopilotKit) to [Cl
 
 **⚠️ Before deploying to production, read [Security & Privacy](docs/security.md).**
 
-### Install
+### 1. Install
 
 ```bash
 npm install copilotedge
 ```
 
-### Basic Usage
+### 2. Set Up Environment Variables
+
+Create a file named `.env.local` in the root of your project and add your Cloudflare credentials:
+
+```bash
+# .env.local
+CLOUDFLARE_API_TOKEN=your-api-token-here
+CLOUDFLARE_ACCOUNT_ID=your-account-id-here
+```
+
+> **Note:** Never commit your `.env.local` file to version control.
+
+### 3. Create API Route
 
 ```typescript
 // app/api/copilotedge/route.ts (Next.js App Router)
@@ -39,7 +51,7 @@ export const POST = createCopilotEdgeHandler({
 });
 ```
 
-### Configure CopilotKit
+### 4. Configure CopilotKit
 
 ```tsx
 // app/layout.tsx
@@ -74,15 +86,7 @@ export default function Layout({ children }) {
 | [**Examples**](docs/examples.md) | Implementation patterns and demos |
 | [**Streaming Worker**](examples/streaming-worker/) | Hybrid SSE streaming example |
 
-## What's New (v0.2.1)
-
-- Support for OpenAI open-weight models (`gpt-oss-120b`, `gpt-oss-20b`)
-- Enhanced security with `enableInternalSensitiveLogging` flag
-- Comprehensive documentation and benchmarks
-- Cloudflare Pages deployment example
-- Support for latest models (Llama 3.3, Mistral Small 2503, Gemma 3)
-
-See [CHANGELOG](CHANGELOG.md) for full release history.
+See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
 ## API Reference
 
@@ -98,7 +102,8 @@ const handler = createCopilotEdgeHandler({
   debug?: boolean,             // Default: false
   cacheTimeout?: number,       // Default: 60000 (ms)
   maxRetries?: number,         // Default: 3
-  rateLimit?: number           // Default: 60 (requests/min)
+  rateLimit?: number,          // Default: 60 (requests/min)
+  enableInternalSensitiveLogging?: boolean // DANGER: See docs/security.md
 });
 ```
 

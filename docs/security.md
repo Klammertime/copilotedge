@@ -388,7 +388,7 @@ If you suspect a security issue:
 2. **Check Cloudflare audit logs**
 3. **Review application logs**
 4. **Notify affected users if required**
-5. **Report issues to security@anthropic.com**
+5. **Report issues via the [Cloudflare abuse form](https://www.cloudflare.com/abuse/form)**
 
 ## Security Resources
 
