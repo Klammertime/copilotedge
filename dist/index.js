@@ -221,17 +221,24 @@ class CopilotEdge {
         const tests = this.regions.map(async (region) => {
             const start = performance.now();
             try {
-                const response = await fetch(region.url + '/client/v4', {
-                    method: 'HEAD',
-                    signal: AbortSignal.timeout(2000),
-                    headers: {
-                        'Authorization': `Bearer ${this.apiToken}`
+                // Create AbortController for timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 2000);
+                try {
+                    const response = await fetch(region.url + '/client/v4', {
+                        method: 'HEAD',
+                        signal: controller.signal,
+                        headers: {
+                            'Authorization': `Bearer ${this.apiToken}`
+                        }
+                    });
+                    if (response.ok) {
+                        const latency = Math.round(performance.now() - start);
+                        this.regionLatencies.set(region.name, latency);
+                        return { region, latency };
                     }
-                });
-                if (response.ok) {
-                    const latency = Math.round(performance.now() - start);
-                    this.regionLatencies.set(region.name, latency);
-                    return { region, latency };
+                } finally {
+                    clearTimeout(timeoutId);
                 }
             }
             catch (e) {
@@ -260,6 +267,30 @@ class CopilotEdge {
         return this.fastestRegion;
     }
     /**
+     * Sleep with proper cleanup
+     */
+    async sleep(ms) {
+        let timeoutId;
+        try {
+            await new Promise((resolve) => {
+                timeoutId = setTimeout(resolve, ms);
+                // Store timeout ID for cleanup if needed
+                if (!this.activeTimers) {
+                    this.activeTimers = new Set();
+                }
+                this.activeTimers.add(timeoutId);
+            });
+        } finally {
+            // Always clean up the timer
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                if (this.activeTimers) {
+                    this.activeTimers.delete(timeoutId);
+                }
+            }
+        }
+    }
+    /**
      * Retry failed requests with exponential backoff
      */
     async retryWithBackoff(fn, context = 'request') {
@@ -285,7 +316,8 @@ class CopilotEdge {
                         if (this.debug) {
                             console.log(`[CopilotEdge] Retry ${attempt + 1}/${this.maxRetries} for ${context} after ${Math.round(delay + jitter)}ms...`);
                         }
-                        await new Promise(resolve => setTimeout(resolve, delay + jitter));
+                        // Use sleep method with proper cleanup
+                        await this.sleep(delay + jitter);
                     }
                 }
             }
@@ -556,30 +588,37 @@ class CopilotEdge {
     async callCloudflareAI(messages, region) {
         const baseURL = `${region.url}/client/v4/accounts/${this.accountId}/ai/v1`;
         try {
-            const response = await fetch(`${baseURL}/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.apiToken}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    model: this.model,
-                    messages: messages,
-                    temperature: 0.7,
-                    max_tokens: 1000,
-                    stream: false
-                }),
-                signal: AbortSignal.timeout(30000) // 30s timeout
-            });
-            if (!response.ok) {
-                const error = await response.text();
-                throw new APIError(`Cloudflare AI error: ${error}`, response.status);
+            // Create AbortController for timeout with cleanup
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+            try {
+                const response = await fetch(`${baseURL}/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${this.apiToken}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model: this.model,
+                        messages: messages,
+                        temperature: 0.7,
+                        max_tokens: 1000,
+                        stream: false
+                    }),
+                    signal: controller.signal
+                });
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new APIError(`Cloudflare AI error: ${error}`, response.status);
+                }
+                const data = await response.json();
+                if (!data.choices?.[0]?.message?.content) {
+                    throw new APIError('Invalid response from Cloudflare AI', 500);
+                }
+                return data.choices[0].message.content;
+            } finally {
+                clearTimeout(timeoutId);
             }
-            const data = await response.json();
-            if (!data.choices?.[0]?.message?.content) {
-                throw new APIError('Invalid response from Cloudflare AI', 500);
-            }
-            return data.choices[0].message.content;
         }
         catch (error) {
             // If the fastest region fails, reset and retry region selection
@@ -699,8 +738,31 @@ class CopilotEdge {
      */
     clearCache() {
         this.cache.clear();
+        this.cacheLocks.clear();
         if (this.debug) {
             console.log('[CopilotEdge] Cache cleared');
+        }
+    }
+    /**
+     * Destroy instance and clean up resources
+     */
+    destroy() {
+        // Clear all active timers
+        if (this.activeTimers) {
+            for (const timerId of this.activeTimers) {
+                clearTimeout(timerId);
+            }
+            this.activeTimers.clear();
+        }
+        // Clear caches
+        this.cache.clear();
+        this.cacheLocks.clear();
+        this.requestCount.clear();
+        this.regionLatencies.clear();
+        // Reset circuit breaker
+        this.circuitBreaker.reset();
+        if (this.debug) {
+            console.log('[CopilotEdge] Instance destroyed, all resources cleaned up');
         }
     }
     /**
