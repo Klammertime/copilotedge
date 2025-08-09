@@ -137,15 +137,14 @@ class CopilotEdge {
     /**
      * Generate hash for cache key
      */
-    hashRequest(obj) {
+    async hashRequest(obj) {
         const str = JSON.stringify(obj);
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32-bit integer
-        }
-        return hash.toString(36);
+        const encoder = new TextEncoder();
+        const data = encoder.encode(str);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return hashHex; // Full SHA-256 hash to prevent collisions
     }
     /**
      * Get cached response if available
@@ -357,7 +356,7 @@ class CopilotEdge {
             this.validateRequest(body);
             // Check rate limit
             this.checkRateLimit();
-            const cacheKey = this.hashRequest(body);
+            const cacheKey = await this.hashRequest(body);
             // Check for an existing lock
             if (this.cacheLocks.has(cacheKey)) {
                 if (this.debug) {

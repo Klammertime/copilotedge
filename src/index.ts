@@ -328,20 +328,19 @@ export class CopilotEdge {
   }
 
   /**
-   * Generate hash for cache key.
-   * A simple, fast hashing function for creating cache keys from request bodies.
+   * Generate hash for cache key using SHA-256.
+   * Uses cryptographic hashing to prevent collisions in cache keys.
    * @param obj - The object to hash.
-   * @returns A string hash.
+   * @returns A promise that resolves to a hex string hash.
    */
-  private hashRequest(obj: any): string {
+  private async hashRequest(obj: any): Promise<string> {
     const str = JSON.stringify(obj);
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    return hash.toString(36);
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashHex; // Full SHA-256 hash to prevent collisions
   }
 
   /**
@@ -654,7 +653,7 @@ export class CopilotEdge {
       // Check rate limit
       this.checkRateLimit();
       
-      const cacheKey = this.hashRequest(body);
+      const cacheKey = await this.hashRequest(body);
 
       // Check for an existing lock
       if (this.cacheLocks.has(cacheKey)) {
