@@ -5,6 +5,30 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] – 2025-08-09
+
+### Fixed
+- **Critical**: Replaced weak 32-bit hash function with SHA-256 to prevent cache collisions
+- **Critical**: Eliminated memory leaks in retry logic and timer management
+  - Added proper timer cleanup in sleep() method with try/finally
+  - Track active timers in a Set for lifecycle management
+  - Replace AbortSignal.timeout with AbortController for better cleanup
+- **Security**: Added comprehensive request size limits to prevent DoS attacks
+  - Maximum request size (default 1MB)
+  - Maximum message count (default 100)
+  - Individual message size limits (default 10KB)
+  - Object depth validation to prevent deeply nested payloads
+
+### Added
+- New `destroy()` method to clean up all resources (timers, caches, circuit breaker)
+- Configurable DoS protection parameters (maxRequestSize, maxMessages, maxMessageSize, maxObjectDepth)
+- Comprehensive test coverage for memory leak prevention
+- Comprehensive test coverage for DoS protection
+
+### Changed
+- Enhanced `clearCache()` to also clear cache locks
+- Improved error messages for request validation
+
 ## [0.2.3] – 2025-08-08
 
 ### Fixed

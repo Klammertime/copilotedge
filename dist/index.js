@@ -2,7 +2,7 @@
 /**
  * CopilotEdge - Production-ready adapter for CopilotKit + Cloudflare Workers AI
  * @author Audrey Klammer (@Klammertime)
- * @version 0.2.3
+ * @version 0.2.4
  * @license MIT
  *
  * Features:
@@ -19,7 +19,7 @@ exports.CopilotEdge = exports.APIError = exports.ValidationError = void 0;
 exports.createCopilotEdgeHandler = createCopilotEdgeHandler;
 const server_1 = require("next/server");
 /**
- * Request validation error
+ * Represents an error during request validation.
  */
 class ValidationError extends Error {
     constructor(message, field) {
@@ -30,7 +30,7 @@ class ValidationError extends Error {
 }
 exports.ValidationError = ValidationError;
 /**
- * API error with status code
+ * Represents an error from the Cloudflare AI API.
  */
 class APIError extends Error {
     constructor(message, statusCode) {
@@ -41,15 +41,42 @@ class APIError extends Error {
 }
 exports.APIError = APIError;
 /**
- * Circuit Breaker class
+ * Default configuration values for CopilotEdge.
+ */
+const DEFAULTS = {
+    PROVIDER: 'cloudflare',
+    MODEL: '@cf/meta/llama-3.1-8b-instruct',
+    OPENAI_MODELS: {
+        '120b': '@cf/openai/gpt-oss-120b',
+        '20b': '@cf/openai/gpt-oss-20b'
+    },
+    META_MODELS: {
+        '70b': '@cf/meta/llama-3.1-70b',
+        '8b': '@cf/meta/llama-3.1-8b-instruct'
+    },
+    CACHE_TIMEOUT: 60000, // 60 seconds
+    MAX_RETRIES: 3,
+    RATE_LIMIT: 60, // per minute
+    REGION_CHECK_TIMEOUT: 2000, // 2 seconds
+    CACHE_SIZE: 100,
+    MESSAGE_LENGTH_LIMIT: 4000,
+    API_TIMEOUT: 30000, // 30 seconds
+    MAX_BACKOFF: 8000, // 8 seconds
+    JITTER: 500, // 0.5 seconds
+    REGION_CHECK_INTERVAL: 300000, // 5 minutes
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD: 5,
+    CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT: 30000, // 30 seconds
+};
+/**
+ * A simple circuit breaker implementation to prevent cascading failures.
  */
 class CircuitBreaker {
-    constructor() {
+    constructor(threshold = DEFAULTS.CIRCUIT_BREAKER_FAILURE_THRESHOLD, timeout = DEFAULTS.CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT) {
         this.failures = 0;
         this.lastFailureTime = 0;
         this.state = 'closed';
-        this.failureThreshold = 5;
-        this.openStateTimeout = 30000; // 30 seconds
+        this.failureThreshold = threshold;
+        this.openStateTimeout = timeout;
     }
     async execute(fn) {
         if (this.state === 'open') {
@@ -83,25 +110,44 @@ class CircuitBreaker {
     }
 }
 /**
- * Main CopilotEdge class
+ * Main CopilotEdge class for handling AI requests.
  */
 class CopilotEdge {
+    /**
+     * Creates an instance of CopilotEdge.
+     * @param config - Configuration options for CopilotEdge.
+     */
     constructor(config = {}) {
         this.lastRegionCheck = 0;
+        this.isFallbackActive = false;
         // Validate and set configuration
         this.apiToken = config.apiKey || process.env.CLOUDFLARE_API_TOKEN || '';
         this.accountId = config.accountId || process.env.CLOUDFLARE_ACCOUNT_ID || '';
-        this.model = config.model || '@cf/meta/llama-3.1-8b-instruct';
+        this.provider = config.provider || DEFAULTS.PROVIDER;
+        // Handle model configuration with provider and fallback support
+        if (config.model) {
+            // Support legacy model configuration
+            this.model = config.model;
+        }
+        else if (this.provider === 'cloudflare' && config.model?.includes('@cf/openai/')) {
+            // Direct OpenAI model reference
+            this.model = config.model;
+        }
+        else {
+            // Use default model
+            this.model = DEFAULTS.MODEL;
+        }
+        // Set fallback model if provided
+        this.fallbackModel = config.fallback || null;
         this.debug = config.debug || process.env.NODE_ENV === 'development';
-        this.cacheTimeout = config.cacheTimeout || 60000; // 60 seconds
-        this.maxRetries = config.maxRetries || 3;
-        this.rateLimit = config.rateLimit || 60; // requests per minute
+        this.cacheTimeout = config.cacheTimeout || DEFAULTS.CACHE_TIMEOUT;
+        this.maxRetries = config.maxRetries || DEFAULTS.MAX_RETRIES;
+        this.rateLimit = config.rateLimit || DEFAULTS.RATE_LIMIT;
         this.enableInternalSensitiveLogging = config.enableInternalSensitiveLogging || false;
-        // Request size limits for DoS protection
-        this.maxRequestSize = config.maxRequestSize || 1024 * 1024; // 1MB default
-        this.maxMessages = config.maxMessages || 100; // 100 messages default
-        this.maxMessageSize = config.maxMessageSize || 10000; // 10KB per message default
-        this.maxObjectDepth = config.maxObjectDepth || 10; // Max nesting depth
+        this.regionCheckTimeout = config.regionCheckTimeout || DEFAULTS.REGION_CHECK_TIMEOUT;
+        this.cacheSize = config.cacheSize || DEFAULTS.CACHE_SIZE;
+        this.apiTimeout = config.apiTimeout || DEFAULTS.API_TIMEOUT;
+        this.fetch = config.fetch || global.fetch;
         // Validate required fields
         if (!this.apiToken) {
             throw new ValidationError('API key is required. Set config.apiKey or CLOUDFLARE_API_TOKEN env var');
@@ -121,30 +167,40 @@ class CopilotEdge {
         this.fastestRegion = null;
         this.regionLatencies = new Map();
         this.requestCount = new Map();
-        this.circuitBreaker = new CircuitBreaker();
+        this.circuitBreaker = new CircuitBreaker(config.circuitBreakerFailureThreshold || DEFAULTS.CIRCUIT_BREAKER_FAILURE_THRESHOLD, config.circuitBreakerOpenStateTimeout || DEFAULTS.CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT);
         // Metrics tracking
         this.metrics = {
             totalRequests: 0,
             cacheHits: 0,
             errors: 0,
-            avgLatency: []
+            avgLatency: [],
+            fallbackUsed: 0
         };
         if (this.debug) {
-            console.log('[CopilotEdge] Initialized with:', {
-                model: this.model,
+            // For production safety, create a separate log object that limits sensitive info
+            const isProduction = process.env.NODE_ENV === 'production';
+            const logConfig = {
+                // In production, only log generic model info, not specific models
+                model: isProduction ? (this.model.includes('/') ? 'custom-model' : this.model) : this.model,
+                provider: this.provider,
+                fallbackModel: isProduction ? (this.fallbackModel ? 'configured' : 'none') : this.fallbackModel,
                 cacheTimeout: this.cacheTimeout,
                 maxRetries: this.maxRetries,
                 rateLimit: this.rateLimit,
-                maxRequestSize: `${Math.round(this.maxRequestSize / 1024)}KB`,
-                maxMessages: this.maxMessages,
-                maxMessageSize: `${Math.round(this.maxMessageSize / 1024)}KB`,
-                maxObjectDepth: this.maxObjectDepth,
                 enableInternalSensitiveLogging: this.enableInternalSensitiveLogging
-            });
+            };
+            console.log('[CopilotEdge] Initialized with:', logConfig);
+            // Add a warning when debug mode is enabled in production
+            if (isProduction) {
+                console.warn('[CopilotEdge] WARNING: Debug mode is enabled in production environment. This may impact performance.');
+            }
         }
     }
     /**
-     * Generate hash for cache key
+     * Generate hash for cache key using SHA-256.
+     * Uses cryptographic hashing to prevent collisions in cache keys.
+     * @param obj - The object to hash.
+     * @returns A promise that resolves to a hex string hash.
      */
     async hashRequest(obj) {
         const str = JSON.stringify(obj);
@@ -156,7 +212,9 @@ class CopilotEdge {
         return hashHex; // Full SHA-256 hash to prevent collisions
     }
     /**
-     * Get cached response if available
+     * Get cached response if available and not expired.
+     * @param key - The cache key.
+     * @returns The cached data or null if not found.
      */
     getFromCache(key) {
         const cached = this.cache.get(key);
@@ -171,7 +229,9 @@ class CopilotEdge {
         return null;
     }
     /**
-     * Save response to cache
+     * Save response to cache with LRU eviction.
+     * @param key - The cache key.
+     * @param data - The data to cache.
      */
     saveToCache(key, data) {
         this.cache.set(key, {
@@ -179,7 +239,7 @@ class CopilotEdge {
             timestamp: Date.now()
         });
         // LRU eviction when cache gets too large
-        if (this.cache.size > 100) {
+        if (this.cache.size > this.cacheSize) {
             const firstKey = this.cache.keys().next().value;
             if (firstKey) {
                 this.cache.delete(firstKey);
@@ -187,7 +247,9 @@ class CopilotEdge {
         }
     }
     /**
-     * Check rate limit
+     * Check rate limit for a given client ID.
+     * @param clientId - The identifier for the client.
+     * @throws {APIError} if the rate limit is exceeded.
      */
     checkRateLimit(clientId = 'default') {
         const now = Date.now();
@@ -207,12 +269,14 @@ class CopilotEdge {
         }
     }
     /**
-     * Find fastest Cloudflare region
+     * Find the fastest Cloudflare region by sending HEAD requests.
+     * Results are cached for a few minutes to avoid excessive checks.
+     * @returns The fastest region.
      */
     async findFastestRegion() {
         const now = Date.now();
         // Re-test regions every 5 minutes
-        if (this.fastestRegion && now - this.lastRegionCheck < 300000) {
+        if (this.fastestRegion && now - this.lastRegionCheck < DEFAULTS.REGION_CHECK_INTERVAL) {
             return this.fastestRegion;
         }
         if (this.debug) {
@@ -221,24 +285,17 @@ class CopilotEdge {
         const tests = this.regions.map(async (region) => {
             const start = performance.now();
             try {
-                // Create AbortController for timeout
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 2000);
-                try {
-                    const response = await fetch(region.url + '/client/v4', {
-                        method: 'HEAD',
-                        signal: controller.signal,
-                        headers: {
-                            'Authorization': `Bearer ${this.apiToken}`
-                        }
-                    });
-                    if (response.ok) {
-                        const latency = Math.round(performance.now() - start);
-                        this.regionLatencies.set(region.name, latency);
-                        return { region, latency };
+                const response = await this.fetch(region.url + '/client/v4', {
+                    method: 'HEAD',
+                    signal: AbortSignal.timeout(this.regionCheckTimeout),
+                    headers: {
+                        'Authorization': `Bearer ${this.apiToken}`
                     }
-                } finally {
-                    clearTimeout(timeoutId);
+                });
+                if (response.ok) {
+                    const latency = Math.round(performance.now() - start);
+                    this.regionLatencies.set(region.name, latency);
+                    return { region, latency };
                 }
             }
             catch (e) {
@@ -267,31 +324,11 @@ class CopilotEdge {
         return this.fastestRegion;
     }
     /**
-     * Sleep with proper cleanup
-     */
-    async sleep(ms) {
-        let timeoutId;
-        try {
-            await new Promise((resolve) => {
-                timeoutId = setTimeout(resolve, ms);
-                // Store timeout ID for cleanup if needed
-                if (!this.activeTimers) {
-                    this.activeTimers = new Set();
-                }
-                this.activeTimers.add(timeoutId);
-            });
-        } finally {
-            // Always clean up the timer
-            if (timeoutId) {
-                clearTimeout(timeoutId);
-                if (this.activeTimers) {
-                    this.activeTimers.delete(timeoutId);
-                }
-            }
-        }
-    }
-    /**
-     * Retry failed requests with exponential backoff
+     * Retry a function with exponential backoff and jitter.
+     * This is used to handle transient network errors and API failures.
+     * @param fn - The async function to retry.
+     * @param context - A string describing the operation for logging.
+     * @returns The result of the function.
      */
     async retryWithBackoff(fn, context = 'request') {
         return this.circuitBreaker.execute(async () => {
@@ -311,13 +348,12 @@ class CopilotEdge {
                         throw error;
                     }
                     if (attempt < this.maxRetries - 1) {
-                        const delay = Math.min(Math.pow(2, attempt) * 1000, 8000); // Max 8s
-                        const jitter = Math.random() * 500; // Add jitter
+                        const delay = Math.min(Math.pow(2, attempt) * 1000, DEFAULTS.MAX_BACKOFF); // Max 8s
+                        const jitter = Math.random() * DEFAULTS.JITTER; // Add jitter
                         if (this.debug) {
                             console.log(`[CopilotEdge] Retry ${attempt + 1}/${this.maxRetries} for ${context} after ${Math.round(delay + jitter)}ms...`);
                         }
-                        // Use sleep method with proper cleanup
-                        await this.sleep(delay + jitter);
+                        await new Promise(resolve => setTimeout(resolve, delay + jitter));
                     }
                 }
             }
@@ -326,52 +362,19 @@ class CopilotEdge {
         });
     }
     /**
-     * Calculate object size in bytes
-     */
-    getObjectSize(obj) {
-        const str = JSON.stringify(obj);
-        return new Blob([str]).size;
-    }
-    /**
-     * Check object depth to prevent deeply nested attack payloads
-     */
-    checkObjectDepth(obj, maxDepth = null, currentDepth = 0) {
-        const limit = maxDepth || this.maxObjectDepth;
-        if (currentDepth > limit) {
-            throw new ValidationError(`Request exceeds maximum nesting depth of ${limit}`);
-        }
-        if (obj && typeof obj === 'object') {
-            for (const key in obj) {
-                if (obj.hasOwnProperty(key)) {
-                    this.checkObjectDepth(obj[key], limit, currentDepth + 1);
-                }
-            }
-        }
-    }
-    /**
-     * Validate request body
+     * Validate the structure of the incoming request body.
+     * Supports both CopilotKit GraphQL and direct chat message formats.
+     * @param body - The request body.
+     * @throws {ValidationError} if the body is invalid.
      */
     validateRequest(body) {
         if (!body || typeof body !== 'object') {
             throw new ValidationError('Request body must be an object');
         }
-        // Check request size
-        const requestSize = this.getObjectSize(body);
-        if (requestSize > this.maxRequestSize) {
-            throw new ValidationError(`Request size (${Math.round(requestSize / 1024)}KB) exceeds maximum allowed size (${Math.round(this.maxRequestSize / 1024)}KB)`);
-        }
-        // Check object depth to prevent deeply nested payloads
-        this.checkObjectDepth(body);
         // Check for GraphQL mutation
         if (body.operationName === 'generateCopilotResponse') {
             if (!body.variables?.data) {
                 throw new ValidationError('Missing variables.data in GraphQL mutation');
-            }
-            // Validate GraphQL data size (half of max request size)
-            const dataSize = this.getObjectSize(body.variables.data);
-            const maxGraphQLSize = this.maxRequestSize / 2;
-            if (dataSize > maxGraphQLSize) {
-                throw new ValidationError(`GraphQL data size exceeds ${Math.round(maxGraphQLSize / 1024)}KB limit`);
             }
             return;
         }
@@ -380,22 +383,20 @@ class CopilotEdge {
             if (!Array.isArray(body.messages)) {
                 throw new ValidationError('messages must be an array');
             }
-            // Limit number of messages to prevent abuse
-            if (body.messages.length > this.maxMessages) {
-                throw new ValidationError(`Number of messages (${body.messages.length}) exceeds maximum allowed (${this.maxMessages})`);
-            }
-            // Validate each message
-            for (const msg of body.messages) {
+            // Check for null/undefined messages
+            for (let i = 0; i < body.messages.length; i++) {
+                const msg = body.messages[i];
+                if (!msg) {
+                    throw new ValidationError(`Message at index ${i} is null or undefined`);
+                }
+                if (typeof msg !== 'object') {
+                    throw new ValidationError(`Message at index ${i} is not an object`);
+                }
                 if (!msg.role || !msg.content) {
                     throw new ValidationError('Each message must have role and content');
                 }
                 if (!['user', 'assistant', 'system'].includes(msg.role)) {
                     throw new ValidationError(`Invalid role: ${msg.role}`);
-                }
-                // Check individual message size
-                const messageSize = new Blob([String(msg.content)]).size;
-                if (messageSize > this.maxMessageSize) {
-                    throw new ValidationError(`Message size (${Math.round(messageSize / 1024)}KB) exceeds maximum allowed (${Math.round(this.maxMessageSize / 1024)}KB)`);
                 }
             }
             return;
@@ -403,17 +404,20 @@ class CopilotEdge {
         throw new ValidationError('Unsupported request format. Expected CopilotKit GraphQL or chat messages');
     }
     /**
-     * Sanitize messages for AI
+     * Sanitize messages for the AI, ensuring consistent format and length.
+     * @param messages - The messages to sanitize.
+     * @returns A new array of sanitized messages.
      */
     sanitizeMessages(messages) {
         return messages.map(msg => ({
             role: msg.role,
-            content: String(msg.content).slice(0, 4000) // Limit message length
+            content: String(msg.content).slice(0, DEFAULTS.MESSAGE_LENGTH_LIMIT) // Limit message length
         }));
     }
     /**
-     * Check if messages contain sensitive content
-     * WARNING: This should only be used for internal monitoring, never exposed to clients
+     * WARNING: This should only be used for internal monitoring, never exposed to clients.
+     * @param messages The messages to check.
+     * @returns True if sensitive content is detected.
      */
     containsSensitiveContent(messages) {
         if (!this.enableInternalSensitiveLogging) {
@@ -432,8 +436,37 @@ class CopilotEdge {
         return messages.some(m => patterns.some(p => p.test(String(m.content || ''))));
     }
     /**
-     * Handle incoming requests
+     * Extracts and sanitizes messages from a request body.
+     * Handles both CopilotKit GraphQL and direct chat formats.
+     * @param body The request body.
+     * @returns An array of sanitized messages or null if no valid messages are found.
+     */
+    getSanitizedMessages(body) {
+        let messages = [];
+        if (body.operationName === 'generateCopilotResponse' && body.variables?.data) {
+            messages = (body.variables.data.messages || [])
+                .filter((msg) => msg.textMessage &&
+                msg.textMessage.content &&
+                msg.textMessage.content.trim().length > 0 &&
+                msg.textMessage.role !== 'system')
+                .map((msg) => ({
+                role: msg.textMessage.role,
+                content: msg.textMessage.content.trim()
+            }));
+        }
+        else if (body.messages && Array.isArray(body.messages)) {
+            messages = body.messages;
+        }
+        if (messages.length === 0) {
+            return null;
+        }
+        return this.sanitizeMessages(messages);
+    }
+    /**
+     * Main request handler. Orchestrates validation, caching, region selection, and the final API call.
      * NOTE: Streaming is NOT supported. All responses are returned complete.
+     * @param body The request body.
+     * @returns The response from the AI or cache.
      */
     async handleRequest(body) {
         const start = performance.now();
@@ -514,31 +547,21 @@ class CopilotEdge {
         }
     }
     /**
-     * Handle CopilotKit GraphQL mutations
+     * Handle CopilotKit GraphQL mutations.
+     * @param body - The GraphQL request body.
+     * @param region - The selected Cloudflare region.
+     * @returns A GraphQL-formatted response.
      */
     async handleGraphQLMutation(body, region) {
-        const data = body.variables.data;
-        const messages = data.messages || [];
-        // Extract conversation messages
-        const conversationMessages = messages
-            .filter((msg) => msg.textMessage &&
-            msg.textMessage.content &&
-            msg.textMessage.content.trim().length > 0 &&
-            msg.textMessage.role !== 'system')
-            .map((msg) => ({
-            role: msg.textMessage.role,
-            content: msg.textMessage.content.trim()
-        }));
-        if (conversationMessages.length === 0) {
-            return this.createDefaultResponse(data.threadId);
+        const sanitized = this.getSanitizedMessages(body);
+        if (!sanitized) {
+            return this.createDefaultResponse(body.variables.data.threadId);
         }
-        // Sanitize and call AI
-        const sanitized = this.sanitizeMessages(conversationMessages);
         const response = await this.retryWithBackoff(async () => await this.callCloudflareAI(sanitized, region), 'Cloudflare AI');
         return {
             data: {
                 generateCopilotResponse: {
-                    threadId: data.threadId || 'default-thread',
+                    threadId: body.variables.data.threadId || 'default-thread',
                     runId: `run-${Date.now()}`,
                     extensions: {},
                     status: { code: 'SUCCESS', __typename: 'BaseResponseStatus' },
@@ -557,10 +580,17 @@ class CopilotEdge {
         };
     }
     /**
-     * Handle direct chat format
+     * Handle direct chat format requests.
+     * @param body - The chat request body.
+     * @param region - The selected Cloudflare region.
+     * @returns An OpenAI-compatible chat completion response.
      */
     async handleDirectChat(body, region) {
-        const sanitized = this.sanitizeMessages(body.messages);
+        const sanitized = this.getSanitizedMessages(body);
+        if (!sanitized) {
+            // This case should be handled by validateRequest, but as a fallback:
+            throw new ValidationError('Request body must contain messages.');
+        }
         const response = await this.retryWithBackoff(async () => await this.callCloudflareAI(sanitized, region), 'Cloudflare AI');
         return {
             id: 'chat-' + Date.now(),
@@ -583,55 +613,79 @@ class CopilotEdge {
         };
     }
     /**
-     * Call Cloudflare Workers AI
+     * Call the Cloudflare Workers AI API.
+     * @param messages - The sanitized messages to send.
+     * @param region - The selected Cloudflare region.
+     * @returns The AI's response content as a string.
      */
     async callCloudflareAI(messages, region) {
         const baseURL = `${region.url}/client/v4/accounts/${this.accountId}/ai/v1`;
+        // If we've already tried the primary model and it failed,
+        // use the fallback model if available
+        const activeModel = this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model;
         try {
-            // Create AbortController for timeout with cleanup
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
-            try {
-                const response = await fetch(`${baseURL}/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${this.apiToken}`,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        model: this.model,
-                        messages: messages,
-                        temperature: 0.7,
-                        max_tokens: 1000,
-                        stream: false
-                    }),
-                    signal: controller.signal
-                });
-                if (!response.ok) {
-                    const error = await response.text();
-                    throw new APIError(`Cloudflare AI error: ${error}`, response.status);
+            const response = await this.fetch(`${baseURL}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.apiToken}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model: activeModel,
+                    messages: messages,
+                    temperature: 0.7,
+                    max_tokens: 1000,
+                    stream: false
+                }),
+                signal: AbortSignal.timeout(this.apiTimeout) // 30s timeout
+            });
+            if (!response.ok) {
+                const error = await response.text();
+                // If we get a 404 (model not found) or a 429 (rate limit exceeded),
+                // and we have a fallback model, and we haven't tried the fallback yet,
+                // switch to the fallback model and retry
+                if ((response.status === 404 || response.status === 429) &&
+                    this.fallbackModel &&
+                    !this.isFallbackActive) {
+                    if (this.debug) {
+                        const isProduction = process.env.NODE_ENV === 'production';
+                        // In production, don't log specific model names
+                        if (isProduction) {
+                            console.log(`[CopilotEdge] Primary model unavailable, using fallback model`);
+                        }
+                        else {
+                            console.log(`[CopilotEdge] Model ${activeModel} unavailable, falling back to ${this.fallbackModel}`);
+                        }
+                    }
+                    this.isFallbackActive = true;
+                    this.metrics.fallbackUsed++;
+                    // Retry with fallback model
+                    return await this.callCloudflareAI(messages, region);
                 }
-                const data = await response.json();
-                if (!data.choices?.[0]?.message?.content) {
-                    throw new APIError('Invalid response from Cloudflare AI', 500);
-                }
-                return data.choices[0].message.content;
-            } finally {
-                clearTimeout(timeoutId);
+                throw new APIError(`Cloudflare AI error: ${error}`, response.status);
             }
+            const data = await response.json();
+            if (!data.choices?.[0]?.message?.content) {
+                throw new APIError('Invalid response from Cloudflare AI', 500);
+            }
+            return data.choices[0].message.content;
         }
         catch (error) {
-            // If the fastest region fails, reset and retry region selection
-            if (this.debug) {
-                console.log(`[CopilotEdge] Region ${region.name} failed, re-evaluating...`);
+            // If error is not API related, reset region selection
+            if (!(error instanceof APIError)) {
+                if (this.debug) {
+                    console.log(`[CopilotEdge] Region ${region.name} failed, re-evaluating...`);
+                }
+                this.fastestRegion = null;
+                this.lastRegionCheck = 0;
             }
-            this.fastestRegion = null;
-            this.lastRegionCheck = 0;
             throw error;
         }
     }
     /**
-     * Create default response
+     * Create a default response for when there are no messages to process.
+     * @param threadId The thread ID from the request.
+     * @returns A default GraphQL response.
      */
     createDefaultResponse(threadId) {
         return {
@@ -652,7 +706,8 @@ class CopilotEdge {
         };
     }
     /**
-     * Update performance metrics
+     * Update performance metrics after a request.
+     * @param latency - The latency of the request in milliseconds.
      */
     updateMetrics(latency) {
         this.metrics.avgLatency.push(latency);
@@ -662,7 +717,7 @@ class CopilotEdge {
         }
     }
     /**
-     * Log current metrics
+     * Log current metrics to the console if in debug mode.
      */
     logMetrics() {
         const avg = this.metrics.avgLatency.length > 0
@@ -671,15 +726,27 @@ class CopilotEdge {
         const cacheRate = this.metrics.totalRequests > 0
             ? Math.round((this.metrics.cacheHits / this.metrics.totalRequests) * 100)
             : 0;
-        console.log('[CopilotEdge] Metrics:', {
+        const fallbackRate = this.metrics.totalRequests > 0
+            ? Math.round((this.metrics.fallbackUsed / this.metrics.totalRequests) * 100)
+            : 0;
+        const isProduction = process.env.NODE_ENV === 'production';
+        const metricsLog = {
             totalRequests: this.metrics.totalRequests,
             cacheHitRate: `${cacheRate}%`,
             avgLatency: `${avg}ms`,
-            errors: this.metrics.errors
-        });
+            errors: this.metrics.errors,
+            fallbackUsed: this.metrics.fallbackUsed,
+            fallbackRate: `${fallbackRate}%`,
+            // In production, only indicate if using primary or fallback, not specific model names
+            activeModel: isProduction
+                ? (this.isFallbackActive ? 'fallback-model' : 'primary-model')
+                : (this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model)
+        };
+        console.log('[CopilotEdge] Metrics:', metricsLog);
     }
     /**
-     * Create Next.js API route handler
+     * Creates a Next.js API route handler for seamless integration.
+     * @returns An async function that handles a `NextRequest` and returns a `NextResponse`.
      */
     createNextHandler() {
         return async (req) => {
@@ -716,7 +783,8 @@ class CopilotEdge {
         };
     }
     /**
-     * Get current metrics
+     * Get the current performance and usage metrics.
+     * @returns An object containing key metrics.
      */
     getMetrics() {
         const avg = this.metrics.avgLatency.length > 0
@@ -730,43 +798,25 @@ class CopilotEdge {
             avgLatency: avg,
             errors: this.metrics.errors,
             errorRate: this.metrics.totalRequests > 0
-                ? (this.metrics.errors / this.metrics.totalRequests) : 0
+                ? (this.metrics.errors / this.metrics.totalRequests) : 0,
+            fallbackUsed: this.metrics.fallbackUsed,
+            fallbackRate: this.metrics.totalRequests > 0
+                ? (this.metrics.fallbackUsed / this.metrics.totalRequests) : 0,
+            activeModel: this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model
         };
     }
     /**
-     * Clear cache
+     * Clears the in-memory cache.
      */
     clearCache() {
         this.cache.clear();
-        this.cacheLocks.clear();
         if (this.debug) {
             console.log('[CopilotEdge] Cache cleared');
         }
     }
     /**
-     * Destroy instance and clean up resources
-     */
-    destroy() {
-        // Clear all active timers
-        if (this.activeTimers) {
-            for (const timerId of this.activeTimers) {
-                clearTimeout(timerId);
-            }
-            this.activeTimers.clear();
-        }
-        // Clear caches
-        this.cache.clear();
-        this.cacheLocks.clear();
-        this.requestCount.clear();
-        this.regionLatencies.clear();
-        // Reset circuit breaker
-        this.circuitBreaker.reset();
-        if (this.debug) {
-            console.log('[CopilotEdge] Instance destroyed, all resources cleaned up');
-        }
-    }
-    /**
-     * Test all features
+     * Runs a series of checks to test and display the current configuration and feature status.
+     * Useful for debugging and ensuring the instance is configured correctly.
      */
     async testFeatures() {
         console.log('🚀 CopilotEdge Feature Test\n');
@@ -775,7 +825,17 @@ class CopilotEdge {
         console.log('\n✅ Configuration');
         console.log('  API Token:', this.apiToken ? 'Set' : '❌ Missing');
         console.log('  Account ID:', this.accountId ? 'Set' : '❌ Missing');
-        console.log('  Model:', this.model);
+        console.log('  Provider:', this.provider);
+        // Apply production safeguards to model information
+        const isProduction = process.env.NODE_ENV === 'production';
+        if (isProduction) {
+            console.log('  Model:', this.model.includes('/') ? 'custom-model' : this.model);
+            console.log('  Fallback:', this.fallbackModel ? 'Configured' : 'None');
+        }
+        else {
+            console.log('  Model:', this.model);
+            console.log('  Fallback:', this.fallbackModel || 'None');
+        }
         console.log('  Debug:', this.debug ? 'ON' : 'OFF');
         // 2. Region selection
         console.log('\n✅ Auto-Region Selection');
@@ -796,6 +856,7 @@ class CopilotEdge {
         console.log('\n✅ Retry Logic');
         console.log('  Max retries:', this.maxRetries);
         console.log('  Backoff: Exponential with jitter');
+        console.log('  Fallback:', this.fallbackModel ? 'Enabled' : 'Disabled');
         // 6. Metrics
         console.log('\n✅ Performance Metrics');
         const metrics = this.getMetrics();
@@ -806,9 +867,9 @@ class CopilotEdge {
 }
 exports.CopilotEdge = CopilotEdge;
 /**
- * Create a Next.js API route handler
- * @param config CopilotEdge configuration
- * @returns Next.js route handler
+ * A convenience function to create a Next.js API route handler.
+ * @param config - CopilotEdge configuration options.
+ * @returns A Next.js route handler function.
  */
 function createCopilotEdgeHandler(config) {
     const edge = new CopilotEdge(config);
