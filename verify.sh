@@ -34,7 +34,15 @@ grep -q "event: open" examples/streaming-worker/src/worker.ts && echo "✓ SSE s
 # Check tarball contents
 echo -e "\nChecking npm package..."
 npm pack > /dev/null 2>&1
-tar -tzf copilotedge-*.tgz | grep -q "dist/index.js" && echo "✓ dist/index.js in tarball" || exit 1
-tar -tzf copilotedge-*.tgz | grep -q "dist/index.d.ts" && echo "✓ dist/index.d.ts in tarball" || exit 1
+TARBALL=$(ls copilotedge-*.tgz 2>/dev/null | head -n1)
+if [ -z "$TARBALL" ]; then
+  echo "✗ Failed to create tarball"
+  exit 1
+fi
+tar -tzf "$TARBALL" | grep -q "dist/index.js" && echo "✓ dist/index.js in tarball" || exit 1
+tar -tzf "$TARBALL" | grep -q "dist/index.d.ts" && echo "✓ dist/index.d.ts in tarball" || exit 1
+
+# Clean up tarball
+rm -f "$TARBALL"
 
 echo -e "\n=== All checks passed ==="
