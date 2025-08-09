@@ -67,6 +67,49 @@ export class APIError extends Error {
 }
 
 /**
+ * Circuit Breaker class
+ */
+class CircuitBreaker {
+  private failures = 0;
+  private lastFailureTime = 0;
+  private state: 'closed' | 'open' | 'half-open' = 'closed';
+  private failureThreshold = 5;
+  private openStateTimeout = 30000; // 30 seconds
+
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.state === 'open') {
+      if (Date.now() - this.lastFailureTime > this.openStateTimeout) {
+        this.state = 'half-open';
+      } else {
+        throw new Error('Circuit breaker is open');
+      }
+    }
+
+    try {
+      const result = await fn();
+      this.reset();
+      return result;
+    } catch (error) {
+      this.recordFailure();
+      throw error;
+    }
+  }
+
+  private recordFailure() {
+    this.failures++;
+    this.lastFailureTime = Date.now();
+    if (this.failures >= this.failureThreshold) {
+      this.state = 'open';
+    }
+  }
+
+  private reset() {
+    this.failures = 0;
+    this.state = 'closed';
+  }
+}
+
+/**
  * Main CopilotEdge class
  */
 export class CopilotEdge {
@@ -75,13 +118,16 @@ export class CopilotEdge {
   private model: string;
   private debug: boolean;
   private cache: Map<string, { data: any; timestamp: number }>;
+  private cacheLocks: Map<string, Promise<any>>;
   private cacheTimeout: number;
   private maxRetries: number;
   private regions: Region[];
   private fastestRegion: Region | null;
   private regionLatencies: Map<string, number>;
+  private lastRegionCheck: number = 0;
   private requestCount: Map<string, number>;
   private rateLimit: number;
+  private circuitBreaker: CircuitBreaker;
   private metrics: {
     totalRequests: number;
     cacheHits: number;
@@ -111,6 +157,7 @@ export class CopilotEdge {
     
     // Initialize cache
     this.cache = new Map();
+    this.cacheLocks = new Map();
     
     // Edge regions ordered by typical performance
     this.regions = [
@@ -122,6 +169,7 @@ export class CopilotEdge {
     this.fastestRegion = null;
     this.regionLatencies = new Map();
     this.requestCount = new Map();
+    this.circuitBreaker = new CircuitBreaker();
     
     // Metrics tracking
     this.metrics = {
@@ -169,6 +217,7 @@ export class CopilotEdge {
       }
       return { ...cached.data, cached: true };
     }
+
     return null;
   }
 
@@ -218,8 +267,12 @@ export class CopilotEdge {
    * Find fastest Cloudflare region
    */
   private async findFastestRegion(): Promise<Region> {
-    if (this.fastestRegion) return this.fastestRegion;
-    
+    const now = Date.now();
+    // Re-test regions every 5 minutes
+    if (this.fastestRegion && now - this.lastRegionCheck < 300000) {
+      return this.fastestRegion;
+    }
+
     if (this.debug) {
       console.log('[CopilotEdge] Testing edge regions for optimal performance...');
     }
@@ -247,14 +300,23 @@ export class CopilotEdge {
     });
     
     const results = await Promise.all(tests);
-    const fastest = results.reduce((min, curr) => 
-      curr.latency < min.latency ? curr : min
-    );
+    const sortedRegions = results.sort((a, b) => a.latency - b.latency);
     
-    this.fastestRegion = fastest.region;
+    const fastest = sortedRegions[0];
+
+    if (fastest.latency === 9999) {
+      if (this.debug) {
+        console.log('[CopilotEdge] WARNING: All regions failed, falling back to default');
+      }
+      this.fastestRegion = this.regions[0]; // Fallback to default
+    } else {
+      this.fastestRegion = fastest.region;
+    }
     
+    this.lastRegionCheck = now;
+
     if (this.debug) {
-      console.log(`[CopilotEdge] Selected: ${fastest.region.name} (${fastest.latency}ms)`);
+      console.log(`[CopilotEdge] Selected: ${this.fastestRegion.name} (${fastest.latency}ms)`);
       const latencies = Object.fromEntries(this.regionLatencies);
       console.log('[CopilotEdge] All regions:', latencies);
     }
@@ -269,39 +331,41 @@ export class CopilotEdge {
     fn: () => Promise<T>, 
     context: string = 'request'
   ): Promise<T> {
-    let lastError: any;
-    
-    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
-      try {
-        return await fn();
-      } catch (error: any) {
-        lastError = error;
-        
-        // Don't retry on validation errors
-        if (error instanceof ValidationError) {
-          throw error;
-        }
-        
-        // Don't retry on 4xx errors (except 429)
-        if (error instanceof APIError && error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 429) {
-          throw error;
-        }
-        
-        if (attempt < this.maxRetries - 1) {
-          const delay = Math.min(Math.pow(2, attempt) * 1000, 8000); // Max 8s
-          const jitter = Math.random() * 500; // Add jitter
+    return this.circuitBreaker.execute(async () => {
+      let lastError: any;
+      
+      for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+        try {
+          return await fn();
+        } catch (error: any) {
+          lastError = error;
           
-          if (this.debug) {
-            console.log(`[CopilotEdge] Retry ${attempt + 1}/${this.maxRetries} for ${context} after ${Math.round(delay + jitter)}ms...`);
+          // Don't retry on validation errors
+          if (error instanceof ValidationError) {
+            throw error;
           }
           
-          await new Promise(resolve => setTimeout(resolve, delay + jitter));
+          // Don't retry on 4xx errors (except 429)
+          if (error instanceof APIError && error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 429) {
+            throw error;
+          }
+          
+          if (attempt < this.maxRetries - 1) {
+            const delay = Math.min(Math.pow(2, attempt) * 1000, 8000); // Max 8s
+            const jitter = Math.random() * 500; // Add jitter
+            
+            if (this.debug) {
+              console.log(`[CopilotEdge] Retry ${attempt + 1}/${this.maxRetries} for ${context} after ${Math.round(delay + jitter)}ms...`);
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, delay + jitter));
+          }
         }
       }
-    }
-    
-    this.metrics.errors++;
-    throw lastError;
+      
+      this.metrics.errors++;
+      throw lastError;
+    });
   }
 
   /**
@@ -390,8 +454,17 @@ export class CopilotEdge {
       // Check rate limit
       this.checkRateLimit();
       
-      // Check cache
       const cacheKey = this.hashRequest(body);
+
+      // Check for an existing lock
+      if (this.cacheLocks.has(cacheKey)) {
+        if (this.debug) {
+          console.log(`[CopilotEdge] Cache LOCK HIT (waiting for existing request)`);
+        }
+        await this.cacheLocks.get(cacheKey);
+      }
+
+      // Check cache
       const cached = this.getFromCache(cacheKey);
       if (cached) {
         const latency = Math.round(performance.now() - start);
@@ -404,21 +477,33 @@ export class CopilotEdge {
       }
       
       // Get optimal region
-      const region = await this.findFastestRegion();
+      const region = await this.retryWithBackoff(
+        () => this.findFastestRegion(),
+        'region selection'
+      );
       
       let result;
+      const requestPromise = (async () => {
+        // Handle different request formats
+        if (body.operationName === 'generateCopilotResponse' && body.variables?.data) {
+          return await this.handleGraphQLMutation(body, region);
+        } else if (body.messages && Array.isArray(body.messages)) {
+          return await this.handleDirectChat(body, region);
+        } else {
+          throw new ValidationError('Unsupported request format');
+        }
+      })();
+
+      this.cacheLocks.set(cacheKey, requestPromise);
       
-      // Handle different request formats
-      if (body.operationName === 'generateCopilotResponse' && body.variables?.data) {
-        result = await this.handleGraphQLMutation(body, region);
-      } else if (body.messages && Array.isArray(body.messages)) {
-        result = await this.handleDirectChat(body, region);
-      } else {
-        throw new ValidationError('Unsupported request format');
+      try {
+        result = await requestPromise;
+        // Cache successful response
+        this.saveToCache(cacheKey, result);
+      } finally {
+        // Remove the lock
+        this.cacheLocks.delete(cacheKey);
       }
-      
-      // Cache successful response
-      this.saveToCache(cacheKey, result);
       
       const latency = Math.round(performance.now() - start);
       this.updateMetrics(latency);
@@ -543,37 +628,47 @@ export class CopilotEdge {
   private async callCloudflareAI(messages: any[], region: Region): Promise<string> {
     const baseURL = `${region.url}/client/v4/accounts/${this.accountId}/ai/v1`;
     
-    const response = await fetch(`${baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: messages,
-        temperature: 0.7,
-        max_tokens: 1000,
-        stream: false
-      }),
-      signal: AbortSignal.timeout(30000) // 30s timeout
-    });
+    try {
+      const response = await fetch(`${baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages: messages,
+          temperature: 0.7,
+          max_tokens: 1000,
+          stream: false
+        }),
+        signal: AbortSignal.timeout(30000) // 30s timeout
+      });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new APIError(
-        `Cloudflare AI error: ${error}`,
-        response.status
-      );
-    }
+      if (!response.ok) {
+        const error = await response.text();
+        throw new APIError(
+          `Cloudflare AI error: ${error}`,
+          response.status
+        );
+      }
 
-    const data = await response.json();
+      const data = await response.json();
     
-    if (!data.choices?.[0]?.message?.content) {
-      throw new APIError('Invalid response from Cloudflare AI', 500);
+      if (!data.choices?.[0]?.message?.content) {
+        throw new APIError('Invalid response from Cloudflare AI', 500);
+      }
+    
+      return data.choices[0].message.content;
+    } catch (error) {
+      // If the fastest region fails, reset and retry region selection
+      if (this.debug) {
+        console.log(`[CopilotEdge] Region ${region.name} failed, re-evaluating...`);
+      }
+      this.fastestRegion = null;
+      this.lastRegionCheck = 0;
+      throw error;
     }
-    
-    return data.choices[0].message.content;
   }
 
   /**

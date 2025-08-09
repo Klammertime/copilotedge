@@ -388,6 +388,13 @@ class CopilotEdge {
                 throw new ValidationError(`Too many messages: ${body.messages.length} exceeds limit of ${CONFIG.MAX_MESSAGE_ARRAY_LENGTH}`);
             }
             for (const msg of body.messages) {
+                // Check for null/undefined messages
+                if (msg === null || msg === undefined) {
+                    throw new ValidationError('Message cannot be null or undefined');
+                }
+                if (typeof msg !== 'object') {
+                    throw new ValidationError('Each message must be an object');
+                }
                 if (!msg.role || !msg.content) {
                     throw new ValidationError('Each message must have role and content');
                 }
