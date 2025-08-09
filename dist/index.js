@@ -97,6 +97,11 @@ class CopilotEdge {
         this.maxRetries = config.maxRetries || 3;
         this.rateLimit = config.rateLimit || 60; // requests per minute
         this.enableInternalSensitiveLogging = config.enableInternalSensitiveLogging || false;
+        // Request size limits for DoS protection
+        this.maxRequestSize = config.maxRequestSize || 1024 * 1024; // 1MB default
+        this.maxMessages = config.maxMessages || 100; // 100 messages default
+        this.maxMessageSize = config.maxMessageSize || 10000; // 10KB per message default
+        this.maxObjectDepth = config.maxObjectDepth || 10; // Max nesting depth
         // Validate required fields
         if (!this.apiToken) {
             throw new ValidationError('API key is required. Set config.apiKey or CLOUDFLARE_API_TOKEN env var');
@@ -130,6 +135,10 @@ class CopilotEdge {
                 cacheTimeout: this.cacheTimeout,
                 maxRetries: this.maxRetries,
                 rateLimit: this.rateLimit,
+                maxRequestSize: `${Math.round(this.maxRequestSize / 1024)}KB`,
+                maxMessages: this.maxMessages,
+                maxMessageSize: `${Math.round(this.maxMessageSize / 1024)}KB`,
+                maxObjectDepth: this.maxObjectDepth,
                 enableInternalSensitiveLogging: this.enableInternalSensitiveLogging
             });
         }
@@ -285,16 +294,52 @@ class CopilotEdge {
         });
     }
     /**
+     * Calculate object size in bytes
+     */
+    getObjectSize(obj) {
+        const str = JSON.stringify(obj);
+        return new Blob([str]).size;
+    }
+    /**
+     * Check object depth to prevent deeply nested attack payloads
+     */
+    checkObjectDepth(obj, maxDepth = null, currentDepth = 0) {
+        const limit = maxDepth || this.maxObjectDepth;
+        if (currentDepth > limit) {
+            throw new ValidationError(`Request exceeds maximum nesting depth of ${limit}`);
+        }
+        if (obj && typeof obj === 'object') {
+            for (const key in obj) {
+                if (obj.hasOwnProperty(key)) {
+                    this.checkObjectDepth(obj[key], limit, currentDepth + 1);
+                }
+            }
+        }
+    }
+    /**
      * Validate request body
      */
     validateRequest(body) {
         if (!body || typeof body !== 'object') {
             throw new ValidationError('Request body must be an object');
         }
+        // Check request size
+        const requestSize = this.getObjectSize(body);
+        if (requestSize > this.maxRequestSize) {
+            throw new ValidationError(`Request size (${Math.round(requestSize / 1024)}KB) exceeds maximum allowed size (${Math.round(this.maxRequestSize / 1024)}KB)`);
+        }
+        // Check object depth to prevent deeply nested payloads
+        this.checkObjectDepth(body);
         // Check for GraphQL mutation
         if (body.operationName === 'generateCopilotResponse') {
             if (!body.variables?.data) {
                 throw new ValidationError('Missing variables.data in GraphQL mutation');
+            }
+            // Validate GraphQL data size (half of max request size)
+            const dataSize = this.getObjectSize(body.variables.data);
+            const maxGraphQLSize = this.maxRequestSize / 2;
+            if (dataSize > maxGraphQLSize) {
+                throw new ValidationError(`GraphQL data size exceeds ${Math.round(maxGraphQLSize / 1024)}KB limit`);
             }
             return;
         }
@@ -303,12 +348,22 @@ class CopilotEdge {
             if (!Array.isArray(body.messages)) {
                 throw new ValidationError('messages must be an array');
             }
+            // Limit number of messages to prevent abuse
+            if (body.messages.length > this.maxMessages) {
+                throw new ValidationError(`Number of messages (${body.messages.length}) exceeds maximum allowed (${this.maxMessages})`);
+            }
+            // Validate each message
             for (const msg of body.messages) {
                 if (!msg.role || !msg.content) {
                     throw new ValidationError('Each message must have role and content');
                 }
                 if (!['user', 'assistant', 'system'].includes(msg.role)) {
                     throw new ValidationError(`Invalid role: ${msg.role}`);
+                }
+                // Check individual message size
+                const messageSize = new Blob([String(msg.content)]).size;
+                if (messageSize > this.maxMessageSize) {
+                    throw new ValidationError(`Message size (${Math.round(messageSize / 1024)}KB) exceeds maximum allowed (${Math.round(this.maxMessageSize / 1024)}KB)`);
                 }
             }
             return;

@@ -92,6 +92,26 @@ export interface CopilotEdgeConfig {
    * @default 30000
    */
   circuitBreakerOpenStateTimeout?: number;
+  /**
+   * Maximum request size in bytes to prevent DoS attacks.
+   * @default 1048576 (1MB)
+   */
+  maxRequestSize?: number;
+  /**
+   * Maximum number of messages in a single request.
+   * @default 100
+   */
+  maxMessages?: number;
+  /**
+   * Maximum size of a single message in bytes.
+   * @default 10000 (10KB)
+   */
+  maxMessageSize?: number;
+  /**
+   * Maximum object nesting depth to prevent deeply nested attack payloads.
+   * @default 10
+   */
+  maxObjectDepth?: number;
 }
 
 /**
