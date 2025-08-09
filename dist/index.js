@@ -756,16 +756,32 @@ class CopilotEdge {
         return async (req) => {
             try {
                 const body = await req.json();
-                // Extract client ID from headers for rate limiting
-                const clientId = req.headers.get('x-forwarded-for') ||
+                // Secure client identification for rate limiting
+                // Use combination of IP and user agent for better fingerprinting
+                const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
                     req.headers.get('x-real-ip') ||
+                    req.headers.get('cf-connecting-ip') || // Cloudflare
                     'unknown';
+                const userAgent = req.headers.get('user-agent') || 'unknown';
+                // Create a hash of IP + User Agent for rate limiting
+                const clientIdentifier = `${ip}-${userAgent}`;
+                const encoder = new TextEncoder();
+                const data = encoder.encode(clientIdentifier);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const clientId = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
+                
                 const result = await this.handleRequest(body, clientId);
                 return server_1.NextResponse.json(result, {
                     headers: {
                         'X-Powered-By': 'CopilotEdge',
-                        'X-Cache': result.cached ? 'HIT' : 'MISS'
-                        // Removed X-Contained-Sensitive header for security
+                        'X-Cache': result.cached ? 'HIT' : 'MISS',
+                        // Security headers
+                        'X-Content-Type-Options': 'nosniff',
+                        'X-Frame-Options': 'DENY',
+                        'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+                        'Content-Security-Policy': "default-src 'self'",
+                        'Referrer-Policy': 'strict-origin-when-cross-origin'
                     }
                 });
             }
@@ -775,7 +791,25 @@ class CopilotEdge {
                 }
                 const status = error instanceof APIError ? error.statusCode :
                     error instanceof ValidationError ? 400 : 500;
-                const errorMessage = error instanceof Error ? error.message : String(error);
+                // Sanitize error messages for production
+                let errorMessage;
+                if (process.env.NODE_ENV === 'production' && !this.debug) {
+                    // Generic messages in production to avoid information disclosure
+                    if (status === 400) {
+                        errorMessage = 'Invalid request';
+                    } else if (status === 401) {
+                        errorMessage = 'Unauthorized';
+                    } else if (status === 429) {
+                        errorMessage = 'Too many requests';
+                    } else if (status >= 500) {
+                        errorMessage = 'Internal server error';
+                    } else {
+                        errorMessage = 'Request failed';
+                    }
+                } else {
+                    // Full error messages in development
+                    errorMessage = error instanceof Error ? error.message : String(error);
+                }
                 const errorType = error instanceof Error ? error.name : 'UnknownError';
                 return server_1.NextResponse.json({
                     error: errorMessage,

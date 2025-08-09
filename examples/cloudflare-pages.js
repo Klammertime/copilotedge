@@ -32,15 +32,32 @@ export async function onRequest(context) {
     // Handle the request
     const result = await edge.handleRequest(body);
     
-    // Return response with cache headers
+    // Setup secure CORS headers
+    const allowedOrigins = context.env.ALLOWED_ORIGINS?.split(',') || ['https://localhost:3000'];
+    const origin = context.request.headers.get('Origin');
+    
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Powered-By': 'CopilotEdge',
+      'X-Cache': result.cached ? 'HIT' : 'MISS',
+      'Cache-Control': 'no-cache', // Let Cloudflare handle caching
+      // Security headers
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+      'Content-Security-Policy': "default-src 'self'"
+    };
+    
+    // Only set CORS headers for allowed origins
+    if (origin && allowedOrigins.includes(origin)) {
+      headers['Access-Control-Allow-Origin'] = origin;
+      headers['Access-Control-Allow-Credentials'] = 'true';
+    }
+    
+    // Return response with secure headers
     return new Response(JSON.stringify(result), {
       status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Powered-By': 'CopilotEdge',
-        'X-Cache': result.cached ? 'HIT' : 'MISS',
-        'Cache-Control': 'no-cache' // Let Cloudflare handle caching
-      }
+      headers
     });
     
   } catch (error) {
@@ -69,14 +86,27 @@ export async function onRequest(context) {
  * Optional: Handle OPTIONS for CORS preflight
  */
 export async function onRequestOptions(context) {
+  // Security: Configure allowed origins from environment variable
+  // Set ALLOWED_ORIGINS in Cloudflare Pages environment settings
+  // Example: "https://app.example.com,https://www.example.com"
+  const allowedOrigins = context.env.ALLOWED_ORIGINS?.split(',') || ['https://localhost:3000'];
+  const origin = context.request.headers.get('Origin');
+  
+  const headers = {
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400'
+  };
+  
+  // Only allow specific origins, not wildcards
+  if (origin && allowedOrigins.includes(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+  }
+  
   return new Response(null, {
     status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Max-Age': '86400'
-    }
+    headers
   });
 }
 
