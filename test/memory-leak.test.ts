@@ -63,12 +63,10 @@ describe('Memory Leak Prevention', () => {
 
   describe('Resource Cleanup on Destroy', () => {
     it('should clear all active timers on destroy', async () => {
-      // Start a few sleeps
-      const sleepPromises = [
-        edge.sleep(1000),
-        edge.sleep(2000),
-        edge.sleep(3000)
-      ];
+      // Start a few sleeps but don't await them (intentionally)
+      edge.sleep(1000);
+      edge.sleep(2000);
+      edge.sleep(3000);
       
       // Wait a bit for timers to be set
       await new Promise(resolve => setTimeout(resolve, 10));

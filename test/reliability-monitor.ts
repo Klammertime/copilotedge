@@ -254,7 +254,6 @@ class ReliabilityMonitor {
     console.log('=' .repeat(50));
     
     let checkCount = 0;
-    const startTime = Date.now();
     
     const runCheck = async () => {
       checkCount++;

@@ -392,7 +392,7 @@ describe('CopilotEdge Reliability Tests', () => {
       // Create a mock implementation that properly handles timeout
       const mockFetchWithTimeout = vi.fn().mockImplementation(() => {
         // This promise never resolves within the timeout
-        return new Promise(resolve => {
+        return new Promise(() => {
           // Do nothing, so the AbortSignal.timeout will trigger
         });
       });
@@ -1334,7 +1334,7 @@ describe('CopilotEdge Reliability Tests', () => {
       const options: RequestOptions = { signal: abortController.signal };
       
       // Start the request but don't await it yet
-      // @ts-ignore - TypeScript may not recognize the overloaded function signature
+      // @ts-expect-error - TypeScript may not recognize the overloaded function signature
       const requestPromise = edge.handleRequest(request, options);
       
       // Ensure request has started
