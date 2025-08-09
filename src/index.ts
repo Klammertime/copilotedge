@@ -28,18 +28,61 @@ export interface CopilotEdgeConfig {
   model?: string;
   /** Enable debug logging */
   debug?: boolean;
-  /** Cache timeout in ms (default: 60000) */
+  /** 
+   * Cache timeout in milliseconds.
+   * @default 60000 (60 seconds)
+   */
   cacheTimeout?: number;
-  /** Max retries for failed requests (default: 3) */
+  /**
+   * Maximum number of retries for failed requests.
+   * @default 3
+   */
   maxRetries?: number;
-  /** Rate limit per minute (default: 60) */
+  /** 
+   * Rate limit per minute per client.
+   * @default 60
+   */
   rateLimit?: number;
-  /** DANGER: Enable internal sensitive content logging. DO NOT use in production! (default: false) */
+  /** 
+   * DANGER: Enable internal sensitive content logging. DO NOT use in production! 
+   * @default false
+   */
   enableInternalSensitiveLogging?: boolean;
+  /** 
+   * Timeout for region selection in milliseconds.
+   * @default 2000
+   */
+  regionCheckTimeout?: number;
+  /**
+   * Maximum size of the LRU cache.
+   * @default 100
+   */
+  cacheSize?: number;
+  /**
+   * Timeout for API calls to Cloudflare AI in milliseconds.
+   * @default 30000
+   */
+  apiTimeout?: number;
+  /**
+   * A custom fetch implementation to use for requests.
+   * This is useful for testing and can be used to inject a mock fetch implementation.
+   * @internal
+   */
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  /**
+   * Number of consecutive failures before the circuit opens.
+   * @default 5
+   */
+  circuitBreakerFailureThreshold?: number;
+  /**
+   * How long the circuit remains open before attempting half-open requests (ms).
+   * @default 30000
+   */
+  circuitBreakerOpenStateTimeout?: number;
 }
 
 /**
- * Cloudflare edge region
+ * Cloudflare edge region details.
  */
 export interface Region {
   name: string;
@@ -47,7 +90,7 @@ export interface Region {
 }
 
 /**
- * Request validation error
+ * Represents an error during request validation.
  */
 export class ValidationError extends Error {
   constructor(message: string, public field?: string) {
@@ -57,7 +100,7 @@ export class ValidationError extends Error {
 }
 
 /**
- * API error with status code
+ * Represents an error from the Cloudflare AI API.
  */
 export class APIError extends Error {
   constructor(message: string, public statusCode: number) {
@@ -67,14 +110,38 @@ export class APIError extends Error {
 }
 
 /**
- * Circuit Breaker class
+ * Default configuration values for CopilotEdge.
+ */
+const DEFAULTS = {
+  MODEL: '@cf/meta/llama-3.1-8b-instruct',
+  CACHE_TIMEOUT: 60000, // 60 seconds
+  MAX_RETRIES: 3,
+  RATE_LIMIT: 60, // per minute
+  REGION_CHECK_TIMEOUT: 2000, // 2 seconds
+  CACHE_SIZE: 100,
+  MESSAGE_LENGTH_LIMIT: 4000,
+  API_TIMEOUT: 30000, // 30 seconds
+  MAX_BACKOFF: 8000, // 8 seconds
+  JITTER: 500, // 0.5 seconds
+  REGION_CHECK_INTERVAL: 300000, // 5 minutes
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD: 5,
+  CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT: 30000, // 30 seconds
+};
+
+/**
+ * A simple circuit breaker implementation to prevent cascading failures.
  */
 class CircuitBreaker {
   private failures = 0;
   private lastFailureTime = 0;
   private state: 'closed' | 'open' | 'half-open' = 'closed';
-  private failureThreshold = 5;
-  private openStateTimeout = 30000; // 30 seconds
+  private failureThreshold: number;
+  private openStateTimeout: number;
+
+  constructor(threshold = DEFAULTS.CIRCUIT_BREAKER_FAILURE_THRESHOLD, timeout = DEFAULTS.CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT) {
+    this.failureThreshold = threshold;
+    this.openStateTimeout = timeout;
+  }
 
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     if (this.state === 'open') {
@@ -110,7 +177,7 @@ class CircuitBreaker {
 }
 
 /**
- * Main CopilotEdge class
+ * Main CopilotEdge class for handling AI requests.
  */
 export class CopilotEdge {
   private apiToken: string;
@@ -120,14 +187,18 @@ export class CopilotEdge {
   private cache: Map<string, { data: any; timestamp: number }>;
   private cacheLocks: Map<string, Promise<any>>;
   private cacheTimeout: number;
+  private cacheSize: number;
+  private apiTimeout: number;
   private maxRetries: number;
   private regions: Region[];
   private fastestRegion: Region | null;
   private regionLatencies: Map<string, number>;
   private lastRegionCheck: number = 0;
+  private regionCheckTimeout: number;
   private requestCount: Map<string, number>;
   private rateLimit: number;
   private circuitBreaker: CircuitBreaker;
+  private fetch: (url: string, init?: RequestInit) => Promise<Response>;
   private metrics: {
     totalRequests: number;
     cacheHits: number;
@@ -136,16 +207,24 @@ export class CopilotEdge {
   };
   private enableInternalSensitiveLogging: boolean;
 
+  /**
+   * Creates an instance of CopilotEdge.
+   * @param config - Configuration options for CopilotEdge.
+   */
   constructor(config: CopilotEdgeConfig = {}) {
     // Validate and set configuration
     this.apiToken = config.apiKey || process.env.CLOUDFLARE_API_TOKEN || '';
     this.accountId = config.accountId || process.env.CLOUDFLARE_ACCOUNT_ID || '';
-    this.model = config.model || '@cf/meta/llama-3.1-8b-instruct';
+    this.model = config.model || DEFAULTS.MODEL;
     this.debug = config.debug || process.env.NODE_ENV === 'development';
-    this.cacheTimeout = config.cacheTimeout || 60000; // 60 seconds
-    this.maxRetries = config.maxRetries || 3;
-    this.rateLimit = config.rateLimit || 60; // requests per minute
+    this.cacheTimeout = config.cacheTimeout || DEFAULTS.CACHE_TIMEOUT;
+    this.maxRetries = config.maxRetries || DEFAULTS.MAX_RETRIES;
+    this.rateLimit = config.rateLimit || DEFAULTS.RATE_LIMIT;
     this.enableInternalSensitiveLogging = config.enableInternalSensitiveLogging || false;
+    this.regionCheckTimeout = config.regionCheckTimeout || DEFAULTS.REGION_CHECK_TIMEOUT;
+    this.cacheSize = config.cacheSize || DEFAULTS.CACHE_SIZE;
+    this.apiTimeout = config.apiTimeout || DEFAULTS.API_TIMEOUT;
+    this.fetch = config.fetch || global.fetch;
     
     // Validate required fields
     if (!this.apiToken) {
@@ -169,7 +248,10 @@ export class CopilotEdge {
     this.fastestRegion = null;
     this.regionLatencies = new Map();
     this.requestCount = new Map();
-    this.circuitBreaker = new CircuitBreaker();
+    this.circuitBreaker = new CircuitBreaker(
+      config.circuitBreakerFailureThreshold || DEFAULTS.CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+      config.circuitBreakerOpenStateTimeout || DEFAULTS.CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT
+    );
     
     // Metrics tracking
     this.metrics = {
@@ -191,7 +273,10 @@ export class CopilotEdge {
   }
 
   /**
-   * Generate hash for cache key
+   * Generate hash for cache key.
+   * A simple, fast hashing function for creating cache keys from request bodies.
+   * @param obj - The object to hash.
+   * @returns A string hash.
    */
   private hashRequest(obj: any): string {
     const str = JSON.stringify(obj);
@@ -205,7 +290,9 @@ export class CopilotEdge {
   }
 
   /**
-   * Get cached response if available
+   * Get cached response if available and not expired.
+   * @param key - The cache key.
+   * @returns The cached data or null if not found.
    */
   private getFromCache(key: string): any {
     const cached = this.cache.get(key);
@@ -222,7 +309,9 @@ export class CopilotEdge {
   }
 
   /**
-   * Save response to cache
+   * Save response to cache with LRU eviction.
+   * @param key - The cache key.
+   * @param data - The data to cache.
    */
   private saveToCache(key: string, data: any): void {
     this.cache.set(key, {
@@ -231,7 +320,7 @@ export class CopilotEdge {
     });
     
     // LRU eviction when cache gets too large
-    if (this.cache.size > 100) {
+    if (this.cache.size > this.cacheSize) {
       const firstKey = this.cache.keys().next().value;
       if (firstKey) {
         this.cache.delete(firstKey);
@@ -240,7 +329,9 @@ export class CopilotEdge {
   }
 
   /**
-   * Check rate limit
+   * Check rate limit for a given client ID.
+   * @param clientId - The identifier for the client.
+   * @throws {APIError} if the rate limit is exceeded.
    */
   private checkRateLimit(clientId: string = 'default'): void {
     const now = Date.now();
@@ -264,12 +355,14 @@ export class CopilotEdge {
   }
 
   /**
-   * Find fastest Cloudflare region
+   * Find the fastest Cloudflare region by sending HEAD requests.
+   * Results are cached for a few minutes to avoid excessive checks.
+   * @returns The fastest region.
    */
   private async findFastestRegion(): Promise<Region> {
     const now = Date.now();
     // Re-test regions every 5 minutes
-    if (this.fastestRegion && now - this.lastRegionCheck < 300000) {
+    if (this.fastestRegion && now - this.lastRegionCheck < DEFAULTS.REGION_CHECK_INTERVAL) {
       return this.fastestRegion;
     }
 
@@ -280,9 +373,9 @@ export class CopilotEdge {
     const tests = this.regions.map(async (region) => {
       const start = performance.now();
       try {
-        const response = await fetch(region.url + '/client/v4', {
+        const response = await this.fetch(region.url + '/client/v4', {
           method: 'HEAD',
-          signal: AbortSignal.timeout(2000),
+          signal: AbortSignal.timeout(this.regionCheckTimeout),
           headers: {
             'Authorization': `Bearer ${this.apiToken}`
           }
@@ -325,7 +418,11 @@ export class CopilotEdge {
   }
 
   /**
-   * Retry failed requests with exponential backoff
+   * Retry a function with exponential backoff and jitter.
+   * This is used to handle transient network errors and API failures.
+   * @param fn - The async function to retry.
+   * @param context - A string describing the operation for logging.
+   * @returns The result of the function.
    */
   private async retryWithBackoff<T>(
     fn: () => Promise<T>, 
@@ -351,8 +448,8 @@ export class CopilotEdge {
           }
           
           if (attempt < this.maxRetries - 1) {
-            const delay = Math.min(Math.pow(2, attempt) * 1000, 8000); // Max 8s
-            const jitter = Math.random() * 500; // Add jitter
+            const delay = Math.min(Math.pow(2, attempt) * 1000, DEFAULTS.MAX_BACKOFF); // Max 8s
+            const jitter = Math.random() * DEFAULTS.JITTER; // Add jitter
             
             if (this.debug) {
               console.log(`[CopilotEdge] Retry ${attempt + 1}/${this.maxRetries} for ${context} after ${Math.round(delay + jitter)}ms...`);
@@ -369,7 +466,10 @@ export class CopilotEdge {
   }
 
   /**
-   * Validate request body
+   * Validate the structure of the incoming request body.
+   * Supports both CopilotKit GraphQL and direct chat message formats.
+   * @param body - The request body.
+   * @throws {ValidationError} if the body is invalid.
    */
   private validateRequest(body: any): void {
     if (!body || typeof body !== 'object') {
@@ -390,7 +490,15 @@ export class CopilotEdge {
         throw new ValidationError('messages must be an array');
       }
       
-      for (const msg of body.messages) {
+      // Check for null/undefined messages
+      for (let i = 0; i < body.messages.length; i++) {
+        const msg = body.messages[i];
+        if (!msg) {
+          throw new ValidationError(`Message at index ${i} is null or undefined`);
+        }
+        if (typeof msg !== 'object') {
+          throw new ValidationError(`Message at index ${i} is not an object`);
+        }
         if (!msg.role || !msg.content) {
           throw new ValidationError('Each message must have role and content');
         }
@@ -405,18 +513,21 @@ export class CopilotEdge {
   }
 
   /**
-   * Sanitize messages for AI
+   * Sanitize messages for the AI, ensuring consistent format and length.
+   * @param messages - The messages to sanitize.
+   * @returns A new array of sanitized messages.
    */
   private sanitizeMessages(messages: any[]): any[] {
     return messages.map(msg => ({
       role: msg.role,
-      content: String(msg.content).slice(0, 4000) // Limit message length
+      content: String(msg.content).slice(0, DEFAULTS.MESSAGE_LENGTH_LIMIT) // Limit message length
     }));
   }
 
   /**
-   * Check if messages contain sensitive content
-   * WARNING: This should only be used for internal monitoring, never exposed to clients
+   * WARNING: This should only be used for internal monitoring, never exposed to clients.
+   * @param messages The messages to check.
+   * @returns True if sensitive content is detected.
    */
   private containsSensitiveContent(messages: any[]): boolean {
     if (!this.enableInternalSensitiveLogging) {
@@ -440,8 +551,42 @@ export class CopilotEdge {
   }
 
   /**
-   * Handle incoming requests
+   * Extracts and sanitizes messages from a request body.
+   * Handles both CopilotKit GraphQL and direct chat formats.
+   * @param body The request body.
+   * @returns An array of sanitized messages or null if no valid messages are found.
+   */
+  private getSanitizedMessages(body: any): any[] | null {
+    let messages: any[] = [];
+
+    if (body.operationName === 'generateCopilotResponse' && body.variables?.data) {
+      messages = (body.variables.data.messages || [])
+        .filter((msg: any) => 
+          msg.textMessage && 
+          msg.textMessage.content && 
+          msg.textMessage.content.trim().length > 0 &&
+          msg.textMessage.role !== 'system'
+        )
+        .map((msg: any) => ({
+          role: msg.textMessage.role,
+          content: msg.textMessage.content.trim()
+        }));
+    } else if (body.messages && Array.isArray(body.messages)) {
+      messages = body.messages;
+    }
+
+    if (messages.length === 0) {
+      return null;
+    }
+
+    return this.sanitizeMessages(messages);
+  }
+
+  /**
+   * Main request handler. Orchestrates validation, caching, region selection, and the final API call.
    * NOTE: Streaming is NOT supported. All responses are returned complete.
+   * @param body The request body.
+   * @returns The response from the AI or cache.
    */
   public async handleRequest(body: any): Promise<any> {
     const start = performance.now();
@@ -538,31 +683,18 @@ export class CopilotEdge {
   }
 
   /**
-   * Handle CopilotKit GraphQL mutations
+   * Handle CopilotKit GraphQL mutations.
+   * @param body - The GraphQL request body.
+   * @param region - The selected Cloudflare region.
+   * @returns A GraphQL-formatted response.
    */
   private async handleGraphQLMutation(body: any, region: Region): Promise<any> {
-    const data = body.variables.data;
-    const messages = data.messages || [];
-    
-    // Extract conversation messages
-    const conversationMessages = messages
-      .filter((msg: any) => 
-        msg.textMessage && 
-        msg.textMessage.content && 
-        msg.textMessage.content.trim().length > 0 &&
-        msg.textMessage.role !== 'system'
-      )
-      .map((msg: any) => ({
-        role: msg.textMessage.role,
-        content: msg.textMessage.content.trim()
-      }));
-    
-    if (conversationMessages.length === 0) {
-      return this.createDefaultResponse(data.threadId);
-    }
+    const sanitized = this.getSanitizedMessages(body);
 
-    // Sanitize and call AI
-    const sanitized = this.sanitizeMessages(conversationMessages);
+    if (!sanitized) {
+      return this.createDefaultResponse(body.variables.data.threadId);
+    }
+    
     const response = await this.retryWithBackoff(
       async () => await this.callCloudflareAI(sanitized, region),
       'Cloudflare AI'
@@ -571,7 +703,7 @@ export class CopilotEdge {
     return {
       data: {
         generateCopilotResponse: {
-          threadId: data.threadId || 'default-thread',
+          threadId: body.variables.data.threadId || 'default-thread',
           runId: `run-${Date.now()}`,
           extensions: {},
           status: { code: 'SUCCESS', __typename: 'BaseResponseStatus' },
@@ -591,10 +723,18 @@ export class CopilotEdge {
   }
 
   /**
-   * Handle direct chat format
+   * Handle direct chat format requests.
+   * @param body - The chat request body.
+   * @param region - The selected Cloudflare region.
+   * @returns An OpenAI-compatible chat completion response.
    */
   private async handleDirectChat(body: any, region: Region): Promise<any> {
-    const sanitized = this.sanitizeMessages(body.messages);
+    const sanitized = this.getSanitizedMessages(body);
+
+    if (!sanitized) {
+      // This case should be handled by validateRequest, but as a fallback:
+      throw new ValidationError('Request body must contain messages.');
+    }
     
     const response = await this.retryWithBackoff(
       async () => await this.callCloudflareAI(sanitized, region),
@@ -623,13 +763,16 @@ export class CopilotEdge {
   }
 
   /**
-   * Call Cloudflare Workers AI
+   * Call the Cloudflare Workers AI API.
+   * @param messages - The sanitized messages to send.
+   * @param region - The selected Cloudflare region.
+   * @returns The AI's response content as a string.
    */
   private async callCloudflareAI(messages: any[], region: Region): Promise<string> {
     const baseURL = `${region.url}/client/v4/accounts/${this.accountId}/ai/v1`;
     
     try {
-      const response = await fetch(`${baseURL}/chat/completions`, {
+      const response = await this.fetch(`${baseURL}/chat/completions`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.apiToken}`,
@@ -642,7 +785,7 @@ export class CopilotEdge {
           max_tokens: 1000,
           stream: false
         }),
-        signal: AbortSignal.timeout(30000) // 30s timeout
+        signal: AbortSignal.timeout(this.apiTimeout) // 30s timeout
       });
 
       if (!response.ok) {
@@ -672,7 +815,9 @@ export class CopilotEdge {
   }
 
   /**
-   * Create default response
+   * Create a default response for when there are no messages to process.
+   * @param threadId The thread ID from the request.
+   * @returns A default GraphQL response.
    */
   private createDefaultResponse(threadId?: string): any {
     return {
@@ -694,7 +839,8 @@ export class CopilotEdge {
   }
 
   /**
-   * Update performance metrics
+   * Update performance metrics after a request.
+   * @param latency - The latency of the request in milliseconds.
    */
   private updateMetrics(latency: number): void {
     this.metrics.avgLatency.push(latency);
@@ -706,7 +852,7 @@ export class CopilotEdge {
   }
 
   /**
-   * Log current metrics
+   * Log current metrics to the console if in debug mode.
    */
   private logMetrics(): void {
     const avg = this.metrics.avgLatency.length > 0
@@ -726,7 +872,8 @@ export class CopilotEdge {
   }
 
   /**
-   * Create Next.js API route handler
+   * Creates a Next.js API route handler for seamless integration.
+   * @returns An async function that handles a `NextRequest` and returns a `NextResponse`.
    */
   public createNextHandler() {
     return async (req: NextRequest): Promise<NextResponse> => {
@@ -770,7 +917,8 @@ export class CopilotEdge {
   }
 
   /**
-   * Get current metrics
+   * Get the current performance and usage metrics.
+   * @returns An object containing key metrics.
    */
   public getMetrics() {
     const avg = this.metrics.avgLatency.length > 0
@@ -790,7 +938,7 @@ export class CopilotEdge {
   }
 
   /**
-   * Clear cache
+   * Clears the in-memory cache.
    */
   public clearCache(): void {
     this.cache.clear();
@@ -800,7 +948,8 @@ export class CopilotEdge {
   }
 
   /**
-   * Test all features
+   * Runs a series of checks to test and display the current configuration and feature status.
+   * Useful for debugging and ensuring the instance is configured correctly.
    */
   public async testFeatures(): Promise<void> {
     console.log('🚀 CopilotEdge Feature Test\n');
@@ -847,9 +996,9 @@ export class CopilotEdge {
 }
 
 /**
- * Create a Next.js API route handler
- * @param config CopilotEdge configuration
- * @returns Next.js route handler
+ * A convenience function to create a Next.js API route handler.
+ * @param config - CopilotEdge configuration options.
+ * @returns A Next.js route handler function.
  */
 export function createCopilotEdgeHandler(config?: CopilotEdgeConfig) {
   const edge = new CopilotEdge(config);

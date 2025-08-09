@@ -10,8 +10,10 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "sideEffects": false,
   "files": [
-    "dist",
+    "dist/index.js",
+    "dist/index.d.ts",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -38,7 +40,7 @@
   "homepage": "https://github.com/Klammertime/copilotedge#readme",
   "scripts": {
     "lint": "eslint . --max-warnings=0",
-    "build": "tsc && mkdir -p dist && cp -f src/index.d.ts dist/index.d.ts 2>/dev/null || true",
+    "build": "tsc",
     "test": "vitest run",
     "test:unit": "vitest run test/unit.test.ts",
     "verify": "./verify.sh",
@@ -47,6 +49,9 @@
     "test:watch": "vitest watch",
     "test:integration": "vitest run test/integration.test.ts",
     "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "peerDependencies": {
     "next": ">=13.0.0"
