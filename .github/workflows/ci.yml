@@ -2,41 +2,45 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  build-test-verify:
+  test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix: { node: [18, 20, 22] }
-
+      matrix:
+        node: [18, 20, 22]
+    
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup PNPM
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node ${{ matrix.node }}
-        uses: actions/setup-node@v4
+      
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.14.0
+          
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
           cache: 'pnpm'
-
-
-      - name: Install
-        run: pnpm i --frozen-lockfile
-
+          
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        
       - name: Lint
-        run: pnpm run lint || true  # keep CI moving if lint is noisy for now
-
+        run: pnpm lint
+        
+      - name: Type check
+        run: pnpm typecheck
+        
       - name: Build
-        run: pnpm run build
-
-      - name: Unit tests
-        run: pnpm run test:unit
-
-      - name: Verify packaging & examples
-        run: pnpm run verify
+        run: pnpm build
+        
+      - name: Run unit tests
+        run: pnpm test:unit
+        
+      - name: Verify package
+        run: pnpm verify

@@ -33,14 +33,14 @@ describe('CopilotEdge Unit Tests', () => {
   });
 
   describe('Validation', () => {
-    it('should validate message format', () => {
+    it('should validate message format', async () => {
       const edge = new CopilotEdge({
         apiKey: 'test-key',
         accountId: 'test-account'
       });
       
       // This will fail when trying to validate, which is expected
-      expect(edge.handleRequest({ invalid: 'format' }))
+      await expect(edge.handleRequest({ invalid: 'format' }))
         .rejects.toThrow(ValidationError);
     });
   });

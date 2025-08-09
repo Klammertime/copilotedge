@@ -10,10 +10,6 @@ overrides:
 importers:
 
   .:
-    dependencies:
-      next:
-        specifier: '>=13.0.0'
-        version: 15.4.6(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -33,6 +29,9 @@ importers:
       miniflare:
         specifier: ^3.20250718.1
         version: 3.20250718.1
+      next:
+        specifier: ^15.4.6
+        version: 15.4.6(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
       typescript:
         specifier: ^5.9.2
         version: 5.9.2

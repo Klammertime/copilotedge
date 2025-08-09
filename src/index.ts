@@ -17,6 +17,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
+ * Logger interface for abstracting console logging
+ */
+interface Logger {
+  log: (...args: any[]) => void;
+  warn: (...args: any[]) => void;
+  error: (...args: any[]) => void;
+}
+
+/**
+ * Production logger - suppresses debug logs
+ */
+class ProductionLogger implements Logger {
+  log() {} // No-op in production
+  warn(...args: any[]) { console.warn(...args); }
+  error(...args: any[]) { console.error(...args); }
+}
+
+/**
+ * Debug logger - outputs all logs
+ */
+class DebugLogger implements Logger {
+  log(...args: any[]) { console.log(...args); }
+  warn(...args: any[]) { console.warn(...args); }
+  error(...args: any[]) { console.error(...args); }
+}
+
+/**
  * Configuration options for CopilotEdge
  */
 export interface CopilotEdgeConfig {
@@ -177,8 +204,8 @@ class CircuitBreaker {
   private failures = 0;
   private lastFailureTime = 0;
   private state: 'closed' | 'open' | 'half-open' = 'closed';
-  private failureThreshold: number;
-  private openStateTimeout: number;
+  public failureThreshold: number;
+  public openStateTimeout: number;
 
   constructor(threshold = DEFAULTS.CIRCUIT_BREAKER_FAILURE_THRESHOLD, timeout = DEFAULTS.CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT) {
     this.failureThreshold = threshold;
@@ -228,6 +255,7 @@ export class CopilotEdge {
   private fallbackModel: string | null;
   private provider: string;
   private debug: boolean;
+  private logger: Logger;
   private cache: Map<string, { data: any; timestamp: number }>;
   private cacheLocks: Map<string, Promise<any>>;
   private cacheTimeout: number;
@@ -252,6 +280,10 @@ export class CopilotEdge {
   };
   private enableInternalSensitiveLogging: boolean;
   private isFallbackActive: boolean = false;
+  private maxRequestSize?: number;
+  private maxMessages?: number;
+  private maxMessageSize?: number;
+  private maxObjectDepth?: number;
 
   /**
    * Creates an instance of CopilotEdge.
@@ -279,6 +311,7 @@ export class CopilotEdge {
     this.fallbackModel = config.fallback || null;
     
     this.debug = config.debug || process.env.NODE_ENV === 'development';
+    this.logger = this.debug ? new DebugLogger() : new ProductionLogger();
     this.cacheTimeout = config.cacheTimeout || DEFAULTS.CACHE_TIMEOUT;
     this.maxRetries = config.maxRetries || DEFAULTS.MAX_RETRIES;
     this.rateLimit = config.rateLimit || DEFAULTS.RATE_LIMIT;
@@ -287,6 +320,12 @@ export class CopilotEdge {
     this.cacheSize = config.cacheSize || DEFAULTS.CACHE_SIZE;
     this.apiTimeout = config.apiTimeout || DEFAULTS.API_TIMEOUT;
     this.fetch = config.fetch || global.fetch;
+    
+    // DoS protection settings
+    this.maxRequestSize = config.maxRequestSize;
+    this.maxMessages = config.maxMessages;
+    this.maxMessageSize = config.maxMessageSize;
+    this.maxObjectDepth = config.maxObjectDepth;
     
     // Validate required fields
     if (!this.apiToken) {
@@ -338,11 +377,11 @@ export class CopilotEdge {
         enableInternalSensitiveLogging: this.enableInternalSensitiveLogging
       };
       
-      console.log('[CopilotEdge] Initialized with:', logConfig);
+      this.logger.log('[CopilotEdge] Initialized with:', logConfig);
       
       // Add a warning when debug mode is enabled in production
       if (isProduction) {
-        console.warn('[CopilotEdge] WARNING: Debug mode is enabled in production environment. This may impact performance.');
+        this.logger.warn('[CopilotEdge] WARNING: Debug mode is enabled in production environment. This may impact performance.');
       }
     }
   }
@@ -374,7 +413,7 @@ export class CopilotEdge {
       this.metrics.cacheHits++;
       if (this.debug) {
         const age = Math.round((Date.now() - cached.timestamp) / 1000);
-        console.log(`[CopilotEdge] Cache HIT (age: ${age}s, saved 1 API call)`);
+        this.logger.log(`[CopilotEdge] Cache HIT (age: ${age}s, saved 1 API call)`);
       }
       return { ...cached.data, cached: true };
     }
@@ -441,7 +480,7 @@ export class CopilotEdge {
     }
 
     if (this.debug) {
-      console.log('[CopilotEdge] Testing edge regions for optimal performance...');
+      this.logger.log('[CopilotEdge] Testing edge regions for optimal performance...');
     }
     
     const tests = this.regions.map(async (region) => {
@@ -473,7 +512,7 @@ export class CopilotEdge {
 
     if (fastest.latency === 9999) {
       if (this.debug) {
-        console.log('[CopilotEdge] WARNING: All regions failed, falling back to default');
+        this.logger.log('[CopilotEdge] WARNING: All regions failed, falling back to default');
       }
       this.fastestRegion = this.regions[0]; // Fallback to default
     } else {
@@ -483,9 +522,9 @@ export class CopilotEdge {
     this.lastRegionCheck = now;
 
     if (this.debug) {
-      console.log(`[CopilotEdge] Selected: ${this.fastestRegion.name} (${fastest.latency}ms)`);
+      this.logger.log(`[CopilotEdge] Selected: ${this.fastestRegion.name} (${fastest.latency}ms)`);
       const latencies = Object.fromEntries(this.regionLatencies);
-      console.log('[CopilotEdge] All regions:', latencies);
+      this.logger.log('[CopilotEdge] All regions:', latencies);
     }
     
     return this.fastestRegion;
@@ -526,7 +565,7 @@ export class CopilotEdge {
             const jitter = Math.random() * DEFAULTS.JITTER; // Add jitter
             
             if (this.debug) {
-              console.log(`[CopilotEdge] Retry ${attempt + 1}/${this.maxRetries} for ${context} after ${Math.round(delay + jitter)}ms...`);
+              this.logger.log(`[CopilotEdge] Retry ${attempt + 1}/${this.maxRetries} for ${context} after ${Math.round(delay + jitter)}ms...`);
             }
             
             await new Promise(resolve => setTimeout(resolve, delay + jitter));
@@ -550,6 +589,17 @@ export class CopilotEdge {
       throw new ValidationError('Request body must be an object');
     }
     
+    // Add DoS protection checks
+    const requestSize = JSON.stringify(body).length;
+    if (this.maxRequestSize && requestSize > this.maxRequestSize) {
+      throw new ValidationError(`Request size (${requestSize} bytes) exceeds maximum allowed size (${this.maxRequestSize} bytes)`);
+    }
+    
+    // Check object depth
+    if (this.maxObjectDepth && this.getObjectDepth(body) > this.maxObjectDepth) {
+      throw new ValidationError(`Request object depth exceeds maximum nesting depth (${this.maxObjectDepth})`);
+    }
+    
     // Check for GraphQL mutation
     if (body.operationName === 'generateCopilotResponse') {
       if (!body.variables?.data) {
@@ -562,6 +612,11 @@ export class CopilotEdge {
     if (body.messages) {
       if (!Array.isArray(body.messages)) {
         throw new ValidationError('messages must be an array');
+      }
+      
+      // Check message count limit
+      if (this.maxMessages && body.messages.length > this.maxMessages) {
+        throw new ValidationError(`Number of messages (${body.messages.length}) exceeds maximum allowed (${this.maxMessages})`);
       }
       
       // Check for null/undefined messages
@@ -579,11 +634,39 @@ export class CopilotEdge {
         if (!['user', 'assistant', 'system'].includes(msg.role)) {
           throw new ValidationError(`Invalid role: ${msg.role}`);
         }
+        
+        // Check individual message size
+        if (this.maxMessageSize) {
+          const messageSize = JSON.stringify(msg).length;
+          if (messageSize > this.maxMessageSize) {
+            throw new ValidationError(`Message size at index ${i} (${messageSize} bytes) exceeds maximum allowed (${this.maxMessageSize} bytes)`);
+          }
+        }
       }
       return;
     }
     
     throw new ValidationError('Unsupported request format. Expected CopilotKit GraphQL or chat messages');
+  }
+
+  /**
+   * Helper method to calculate object depth for DoS protection
+   * @param obj - The object to check
+   * @param currentDepth - Current recursion depth
+   * @returns The maximum depth of the object
+   */
+  private getObjectDepth(obj: any, currentDepth = 0): number {
+    if (currentDepth > (this.maxObjectDepth || 10)) return currentDepth;
+    if (typeof obj !== 'object' || obj === null) return currentDepth;
+    
+    let maxDepth = currentDepth;
+    for (const value of Object.values(obj)) {
+      if (typeof value === 'object' && value !== null) {
+        const depth = this.getObjectDepth(value, currentDepth + 1);
+        maxDepth = Math.max(maxDepth, depth);
+      }
+    }
+    return maxDepth;
   }
 
   /**
@@ -678,7 +761,7 @@ export class CopilotEdge {
       // Check for an existing lock
       if (this.cacheLocks.has(cacheKey)) {
         if (this.debug) {
-          console.log(`[CopilotEdge] Cache LOCK HIT (waiting for existing request)`);
+          this.logger.log(`[CopilotEdge] Cache LOCK HIT (waiting for existing request)`);
         }
         await this.cacheLocks.get(cacheKey);
       }
@@ -690,7 +773,7 @@ export class CopilotEdge {
         this.updateMetrics(latency);
         
         if (this.debug) {
-          console.log(`[CopilotEdge] Served from cache in ${latency}ms`);
+          this.logger.log(`[CopilotEdge] Served from cache in ${latency}ms`);
         }
         return cached;
       }
@@ -731,7 +814,7 @@ export class CopilotEdge {
         const ttfb = latency;
         const tokensOut = result.choices?.[0]?.message?.content?.length || 
                          result.data?.generateCopilotResponse?.messages?.[0]?.content?.[0]?.length || 0;
-        console.log(`[CopilotEdge] Request completed`, {
+        this.logger.log(`[CopilotEdge] Request completed`, {
           ttfb_ms: ttfb,
           total_ms: latency,
           tokens_out: Math.floor(tokensOut / 4),
@@ -749,7 +832,7 @@ export class CopilotEdge {
       this.metrics.errors++;
       
       if (this.debug) {
-        console.error('[CopilotEdge] Error:', error.message);
+        this.logger.error('[CopilotEdge] Error:', error.message);
       }
       
       throw error;
@@ -880,9 +963,9 @@ export class CopilotEdge {
             const isProduction = process.env.NODE_ENV === 'production';
             // In production, don't log specific model names
             if (isProduction) {
-              console.log(`[CopilotEdge] Primary model unavailable, using fallback model`);
+              this.logger.log(`[CopilotEdge] Primary model unavailable, using fallback model`);
             } else {
-              console.log(`[CopilotEdge] Model ${activeModel} unavailable, falling back to ${this.fallbackModel}`);
+              this.logger.log(`[CopilotEdge] Model ${activeModel} unavailable, falling back to ${this.fallbackModel}`);
             }
           }
           
@@ -910,7 +993,7 @@ export class CopilotEdge {
       // If error is not API related, reset region selection
       if (!(error instanceof APIError)) {
         if (this.debug) {
-          console.log(`[CopilotEdge] Region ${region.name} failed, re-evaluating...`);
+          this.logger.log(`[CopilotEdge] Region ${region.name} failed, re-evaluating...`);
         }
         this.fastestRegion = null;
         this.lastRegionCheck = 0;
@@ -987,7 +1070,7 @@ export class CopilotEdge {
         : (this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model)
     };
     
-    console.log('[CopilotEdge] Metrics:', metricsLog);
+    this.logger.log('[CopilotEdge] Metrics:', metricsLog);
   }
 
   /**
@@ -1004,7 +1087,7 @@ export class CopilotEdge {
         if (this.enableInternalSensitiveLogging && body.messages && Array.isArray(body.messages)) {
           const containedSensitive = this.containsSensitiveContent(body.messages);
           if (containedSensitive && this.debug) {
-            console.warn('[CopilotEdge] WARNING: Potentially sensitive content detected in request');
+            this.logger.warn('[CopilotEdge] WARNING: Potentially sensitive content detected in request');
             // Log to internal monitoring but NEVER expose to client headers
           }
         }
@@ -1018,7 +1101,7 @@ export class CopilotEdge {
         });
       } catch (error: any) {
         if (this.debug) {
-          console.error('[CopilotEdge] Handler error:', error);
+          this.logger.error('[CopilotEdge] Handler error:', error);
         }
         
         const status = error instanceof APIError ? error.statusCode : 
@@ -1066,8 +1149,33 @@ export class CopilotEdge {
   public clearCache(): void {
     this.cache.clear();
     if (this.debug) {
-      console.log('[CopilotEdge] Cache cleared');
+      this.logger.log('[CopilotEdge] Cache cleared');
     }
+  }
+
+  /**
+   * Cleanup method to prevent memory leaks
+   */
+  public destroy(): void {
+    this.clearCache();
+    this.cacheLocks.clear();
+    this.requestCount.clear();
+    this.regionLatencies.clear();
+    // Reset circuit breaker
+    this.circuitBreaker = new CircuitBreaker(
+      this.circuitBreaker.failureThreshold,
+      this.circuitBreaker.openStateTimeout
+    );
+    if (this.debug) {
+      this.logger.log('[CopilotEdge] Instance destroyed and resources cleaned up');
+    }
+  }
+
+  /**
+   * Helper method to delay execution (for testing)
+   */
+  public sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
