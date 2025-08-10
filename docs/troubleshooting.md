@@ -115,7 +115,7 @@ npm install copilotedge
 ```json
 {
   "dependencies": {
-    "copilotedge": "^0.2.1"
+    "copilotedge": "latest"
   }
 }
 ```

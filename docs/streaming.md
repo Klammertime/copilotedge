@@ -4,7 +4,7 @@ Current status and workarounds for streaming responses.
 
 ## Current Status
 
-**⚠️ Streaming is NOT supported in CopilotEdge v0.2.1**
+**⚠️ Streaming is NOT currently supported in CopilotEdge**
 
 All responses are returned as complete messages after processing is finished.
 
@@ -253,7 +253,6 @@ const [summary, details, examples] = await parallelQueries([
 
 Follow the progress:
 - GitHub Issue: [#streaming-support](https://github.com/Klammertime/copilotedge/issues)
-- Milestone: v0.3.0 (planned)
 
 ### Potential Implementation
 
@@ -309,7 +308,6 @@ If streaming is absolutely required for your use case:
 1. **Direct Cloudflare Workers AI** - Implement streaming directly without CopilotKit
 2. **OpenAI API** - Use OpenAI with streaming support
 3. **Vercel AI SDK** - Has built-in streaming capabilities
-4. **Wait for v0.3.0** - Streaming support is planned
 
 ## Performance Without Streaming
 

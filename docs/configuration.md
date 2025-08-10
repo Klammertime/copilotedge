@@ -17,7 +17,7 @@ const handler = createCopilotEdgeHandler({
 const reliableHandler = createCopilotEdgeHandler({
   apiKey: process.env.CLOUDFLARE_API_TOKEN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-  model: "@cf/openai/gpt-120b",
+  model: "@cf/openai/gpt-oss-120b",
   fallback: "@cf/meta/llama-3.1-8b-instruct",
 });
 ```

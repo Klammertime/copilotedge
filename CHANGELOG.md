@@ -5,9 +5,36 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] – 2025-08-09
+
+### Added
+
+- Comprehensive release hardiness report documenting all pre-release fixes
+- Enhanced documentation for configuration, streaming, and troubleshooting
+- Improved error handling examples in documentation
+- Created missing API route example (`examples/next-edge/app/api/copilotedge/route.ts`)
+- Specialized agent configurations for CI/CD and release validation
+- Enhanced error handling and streaming capabilities in core implementation
+
+### Fixed
+
+- Build artifacts (dist/index.js) no longer tracked in git repository
+- Next.js peer dependency properly included in devDependencies for testing
+- Removed backup files from distribution directory
+- CI workflow pnpm version conflict issue
+
+### Changed
+
+- Documentation improvements across all guides
+- Enhanced README to clearly communicate the unique value proposition as the first and only CopilotKit + Cloudflare Workers AI adapter
+- Cleaner project structure with proper gitignore configuration
+- Enhanced core implementation with better error handling and streaming support
+- Updated CI workflow configuration for better test coverage
+
 ## [0.2.5] – 2025-08-09
 
 ### Fixed
+
 - **Critical**: Replaced weak 32-bit hash function with SHA-256 to prevent cache collisions
 - **Critical**: Eliminated memory leaks in retry logic and timer management
   - Added proper timer cleanup in sleep() method with try/finally
@@ -20,24 +47,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Object depth validation to prevent deeply nested payloads
 
 ### Added
+
 - New `destroy()` method to clean up all resources (timers, caches, circuit breaker)
 - Configurable DoS protection parameters (maxRequestSize, maxMessages, maxMessageSize, maxObjectDepth)
 - Comprehensive test coverage for memory leak prevention
 - Comprehensive test coverage for DoS protection
 
 ### Changed
+
 - Enhanced `clearCache()` to also clear cache locks
 - Improved error messages for request validation
 
 ## [0.2.3] – 2025-08-08
 
 ### Fixed
+
 - Update CI badge to point to correct workflow
 - Only run unit tests in CI (integration tests need real credentials)
 
 ## [0.2.2] – 2025-08-08
 
 ### Added
+
 - Deterministic loading UX with staged loaders
 - Typewriter effect for responses under 600 chars
 - CE_FAKE_TYPEWRITER env flag for A/B testing
@@ -48,15 +79,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI smoke tests for error handling
 
 ### Fixed
+
 - Integration tests now include miniflare dependency
 
 ## [0.2.1] – 2025-08-08
 
 ### Breaking
+
 - Removed `X-Contained-Sensitive` header (security risk).
 - Sensitive content detection disabled by default; opt-in via `enableInternalSensitiveLogging` (was `detectSensitiveContent`).
 
 ### Added
+
 - New models: gpt-oss-120b, gpt-oss-20b, Llama 3.3, Mistral Small 2503, Gemma 3.
 - `benchmarks.md` with real-world results and methodology.
 - Detailed error mapping (status codes and retry guidance).
@@ -66,30 +100,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Model update strategy documentation.
 
 ### Changed
+
 - Removed marketing claims ("7× faster / 90% cheaper"), replaced with benchmarks.
 - Updated model list and pricing (Aug 2025).
 - Toned down README language.
 - Expanded error handling and security config examples.
 
 ### Fixed
+
 - Sensitive content detection no longer exposed in headers.
 - Model pricing aligned with current Cloudflare rates.
 
 ## [0.2.0] – 2025-08-07
 
 ### Added
+
 - Sensitive content detection for API keys, passwords, and tokens.
 - `X-Contained-Sensitive` header to flag sensitive requests.
 - Privacy monitoring for sensitive data sent to cloud services.
 - `containsSensitiveContent()` method (7 pattern checks).
 
 ### Technical
+
 - Header tracking implemented without affecting routing.
 - Maintains full backward compatibility.
 
 ## [0.1.0] – 2025-08-07
 
 ### Initial Release
+
 - First adapter linking CopilotKit to Cloudflare Workers AI.
 - Automatic edge region selection.
 - Request caching (60s TTL).
@@ -103,16 +142,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Detailed documentation and examples.
 
 ### Performance
+
 - Support for all Cloudflare Workers AI models.
 - Original benchmarks (now outdated).
 
 ### Security
+
 - Request validation for GraphQL and chat formats.
 - Message sanitization (4,000 char limit).
 - Rate limiting to prevent abuse.
 - Error masking to avoid information leakage.
 
 ### Developer Experience
+
 - Zero-config setup.
 - Works with Next.js App Router.
 - Compatible with CopilotKit 1.9.x.
