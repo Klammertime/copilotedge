@@ -24,7 +24,7 @@ describe('DoS Protection - Request Size Limits', () => {
         ]
       };
       
-      expect(() => edge.validateRequest(smallRequest)).not.toThrow();
+      expect(() => (edge as any).validateRequest(smallRequest)).not.toThrow();
     });
 
     it('should reject requests exceeding size limit', () => {
@@ -35,9 +35,9 @@ describe('DoS Protection - Request Size Limits', () => {
         ]
       };
       
-      expect(() => edge.validateRequest(largeRequest))
+      expect(() => (edge as any).validateRequest(largeRequest))
         .toThrow(ValidationError);
-      expect(() => edge.validateRequest(largeRequest))
+      expect(() => (edge as any).validateRequest(largeRequest))
         .toThrow(/exceeds maximum allowed size/);
     });
   });
@@ -52,7 +52,7 @@ describe('DoS Protection - Request Size Limits', () => {
         ]
       };
       
-      expect(() => edge.validateRequest(request)).not.toThrow();
+      expect(() => (edge as any).validateRequest(request)).not.toThrow();
     });
 
     it('should reject requests exceeding message count limit', () => {
@@ -63,9 +63,9 @@ describe('DoS Protection - Request Size Limits', () => {
       
       const request = { messages };
       
-      expect(() => edge.validateRequest(request))
+      expect(() => (edge as any).validateRequest(request))
         .toThrow(ValidationError);
-      expect(() => edge.validateRequest(request))
+      expect(() => (edge as any).validateRequest(request))
         .toThrow(/Number of messages.*exceeds maximum allowed/);
     });
   });
@@ -78,7 +78,7 @@ describe('DoS Protection - Request Size Limits', () => {
         ]
       };
       
-      expect(() => edge.validateRequest(request)).not.toThrow();
+      expect(() => (edge as any).validateRequest(request)).not.toThrow();
     });
 
     it('should reject messages exceeding individual size limit', () => {
@@ -90,9 +90,9 @@ describe('DoS Protection - Request Size Limits', () => {
         ]
       };
       
-      expect(() => edge.validateRequest(request))
+      expect(() => (edge as any).validateRequest(request))
         .toThrow(ValidationError);
-      expect(() => edge.validateRequest(request))
+      expect(() => (edge as any).validateRequest(request))
         .toThrow(/Message size.*exceeds maximum allowed/);
     });
   });
@@ -110,7 +110,7 @@ describe('DoS Protection - Request Size Limits', () => {
         }
       };
       
-      expect(() => edge.validateRequest(request)).not.toThrow();
+      expect(() => (edge as any).validateRequest(request)).not.toThrow();
     });
 
     it('should reject deeply nested objects', () => {
@@ -123,9 +123,9 @@ describe('DoS Protection - Request Size Limits', () => {
         current = current.nested;
       }
       
-      expect(() => edge.validateRequest(deeplyNested))
+      expect(() => (edge as any).validateRequest(deeplyNested))
         .toThrow(ValidationError);
-      expect(() => edge.validateRequest(deeplyNested))
+      expect(() => (edge as any).validateRequest(deeplyNested))
         .toThrow(/exceeds maximum nesting depth/);
     });
 
@@ -140,7 +140,7 @@ describe('DoS Protection - Request Size Limits', () => {
       };
       
       // Simple request should not exceed depth
-      expect(() => edge.validateRequest(request)).not.toThrow();
+      expect(() => (edge as any).validateRequest(request)).not.toThrow();
       
       // Test with nested structure at the limit
       const nestedRequest = {
@@ -150,7 +150,7 @@ describe('DoS Protection - Request Size Limits', () => {
         meta: { level1: { value: 'ok' } } // Depth 3, at the limit
       };
       
-      expect(() => edge.validateRequest(nestedRequest)).not.toThrow();
+      expect(() => (edge as any).validateRequest(nestedRequest)).not.toThrow();
     });
   });
 
@@ -170,10 +170,10 @@ describe('DoS Protection - Request Size Limits', () => {
         }
       };
       
-      expect(() => edge.validateRequest(graphQLRequest))
+      expect(() => (edge as any).validateRequest(graphQLRequest))
         .toThrow(ValidationError);
       // The request size check happens first, before the GraphQL specific check
-      expect(() => edge.validateRequest(graphQLRequest))
+      expect(() => (edge as any).validateRequest(graphQLRequest))
         .toThrow(/exceeds maximum allowed size/);
     });
   });
@@ -194,10 +194,10 @@ describe('DoS Protection - Request Size Limits', () => {
       };
       
       // Should not throw with default limits (100 messages)
-      expect(() => defaultEdge.validateRequest(request)).not.toThrow();
+      expect(() => (defaultEdge as any).validateRequest(request)).not.toThrow();
       
       // But should throw with our test edge instance (5 messages)
-      expect(() => edge.validateRequest(request)).toThrow();
+      expect(() => (edge as any).validateRequest(request)).toThrow();
     });
 
     it('should log size limits in debug mode', () => {
@@ -209,7 +209,8 @@ describe('DoS Protection - Request Size Limits', () => {
         debug: true,
         maxRequestSize: 2048,
         maxMessages: 10,
-        maxMessageSize: 500
+        maxMessageSize: 500,
+        maxObjectDepth: 5
       });
       
       expect(consoleSpy).toHaveBeenCalledWith(
@@ -218,7 +219,7 @@ describe('DoS Protection - Request Size Limits', () => {
           maxRequestSize: '2KB',
           maxMessages: 10,
           maxMessageSize: '0KB',
-          maxObjectDepth: 10
+          maxObjectDepth: 5
         })
       );
       
@@ -231,12 +232,12 @@ describe('DoS Protection - Request Size Limits', () => {
       const largeValidRequest = {
         messages: Array(5).fill(null).map((_, i) => ({
           role: i % 2 === 0 ? 'user' : 'assistant',
-          content: 'a'.repeat(90) // Just under 100 byte limit
+          content: 'a'.repeat(60) // Further reduced to ensure it fits under 100 bytes
         }))
       };
       
       const start = performance.now();
-      edge.validateRequest(largeValidRequest);
+      (edge as any).validateRequest(largeValidRequest);
       const duration = performance.now() - start;
       
       // Validation should be fast (under 10ms)

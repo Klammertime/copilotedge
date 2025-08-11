@@ -141,13 +141,7 @@ export interface CopilotEdgeConfig {
   maxObjectDepth?: number;
 }
 
-/**
- * Cloudflare edge region details.
- */
-export interface Region {
-  name: string;
-  url: string;
-}
+// Region interface removed - using Cloudflare's automatic edge routing
 
 /**
  * Represents an error during request validation.
@@ -183,16 +177,15 @@ const DEFAULTS = {
     '70b': '@cf/meta/llama-3.1-70b',
     '8b': '@cf/meta/llama-3.1-8b-instruct'
   },
+  CLOUDFLARE_API_URL: 'https://api.cloudflare.com/client/v4',
   CACHE_TIMEOUT: 60000, // 60 seconds
   MAX_RETRIES: 3,
   RATE_LIMIT: 60, // per minute
-  REGION_CHECK_TIMEOUT: 2000, // 2 seconds
   CACHE_SIZE: 100,
   MESSAGE_LENGTH_LIMIT: 4000,
   API_TIMEOUT: 30000, // 30 seconds
   MAX_BACKOFF: 8000, // 8 seconds
   JITTER: 500, // 0.5 seconds
-  REGION_CHECK_INTERVAL: 300000, // 5 minutes
   CIRCUIT_BREAKER_FAILURE_THRESHOLD: 5,
   CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT: 30000, // 30 seconds
 };
@@ -262,11 +255,6 @@ export class CopilotEdge {
   private cacheSize: number;
   private apiTimeout: number;
   private maxRetries: number;
-  private regions: Region[];
-  private fastestRegion: Region | null;
-  private regionLatencies: Map<string, number>;
-  private lastRegionCheck: number = 0;
-  private regionCheckTimeout: number;
   private requestCount: Map<string, number>;
   private rateLimit: number;
   private circuitBreaker: CircuitBreaker;
@@ -316,7 +304,6 @@ export class CopilotEdge {
     this.maxRetries = config.maxRetries || DEFAULTS.MAX_RETRIES;
     this.rateLimit = config.rateLimit || DEFAULTS.RATE_LIMIT;
     this.enableInternalSensitiveLogging = config.enableInternalSensitiveLogging || false;
-    this.regionCheckTimeout = config.regionCheckTimeout || DEFAULTS.REGION_CHECK_TIMEOUT;
     this.cacheSize = config.cacheSize || DEFAULTS.CACHE_SIZE;
     this.apiTimeout = config.apiTimeout || DEFAULTS.API_TIMEOUT;
     this.fetch = config.fetch || global.fetch;
@@ -339,15 +326,6 @@ export class CopilotEdge {
     this.cache = new Map();
     this.cacheLocks = new Map();
     
-    // Edge regions ordered by typical performance
-    this.regions = [
-      { name: 'US-East', url: 'https://api.cloudflare.com' },
-      { name: 'EU-West', url: 'https://eu.api.cloudflare.com' },
-      { name: 'Asia-Pacific', url: 'https://ap.api.cloudflare.com' },
-    ];
-    
-    this.fastestRegion = null;
-    this.regionLatencies = new Map();
     this.requestCount = new Map();
     this.circuitBreaker = new CircuitBreaker(
       config.circuitBreakerFailureThreshold || DEFAULTS.CIRCUIT_BREAKER_FAILURE_THRESHOLD,
@@ -374,7 +352,11 @@ export class CopilotEdge {
         cacheTimeout: this.cacheTimeout,
         maxRetries: this.maxRetries,
         rateLimit: this.rateLimit,
-        enableInternalSensitiveLogging: this.enableInternalSensitiveLogging
+        enableInternalSensitiveLogging: this.enableInternalSensitiveLogging,
+        maxRequestSize: this.maxRequestSize ? `${Math.round(this.maxRequestSize / 1024)}KB` : 'Not Set',
+        maxMessages: this.maxMessages || 'Not Set',
+        maxMessageSize: this.maxMessageSize ? `${Math.round(this.maxMessageSize / 1024)}KB` : 'Not Set',
+        maxObjectDepth: this.maxObjectDepth || 'Not Set'
       };
       
       this.logger.log('[CopilotEdge] Initialized with:', logConfig);
@@ -468,71 +450,12 @@ export class CopilotEdge {
   }
 
   /**
-   * Find the fastest Cloudflare region by sending HEAD requests.
-   * Results are cached for a few minutes to avoid excessive checks.
-   * @returns The fastest region.
+   * Get the Cloudflare API URL.
+   * Cloudflare automatically routes to the nearest edge location.
+   * @returns The Cloudflare API URL.
    */
-  private async findFastestRegion(): Promise<Region> {
-    const now = Date.now();
-    // Re-test regions every 5 minutes
-    if (this.fastestRegion && now - this.lastRegionCheck < DEFAULTS.REGION_CHECK_INTERVAL) {
-      return this.fastestRegion;
-    }
-
-    // Clear old entries to prevent memory leak (keep max 100 entries)
-    if (this.regionLatencies.size > 100) {
-      this.regionLatencies.clear();
-    }
-
-    if (this.debug) {
-      this.logger.log('[CopilotEdge] Testing edge regions for optimal performance...');
-    }
-    
-    const tests = this.regions.map(async (region) => {
-      const start = performance.now();
-      try {
-        const response = await this.fetch(region.url + '/client/v4', {
-          method: 'HEAD',
-          signal: AbortSignal.timeout(this.regionCheckTimeout),
-          headers: {
-            'Authorization': `Bearer ${this.apiToken}`
-          }
-        });
-        
-        if (response.ok) {
-          const latency = Math.round(performance.now() - start);
-          this.regionLatencies.set(region.name, latency);
-          return { region, latency };
-        }
-      } catch (e) {
-        // Region unavailable
-      }
-      return { region, latency: 9999 };
-    });
-    
-    const results = await Promise.all(tests);
-    const sortedRegions = results.sort((a, b) => a.latency - b.latency);
-    
-    const fastest = sortedRegions[0];
-
-    if (fastest.latency === 9999) {
-      if (this.debug) {
-        this.logger.log('[CopilotEdge] WARNING: All regions failed, falling back to default');
-      }
-      this.fastestRegion = this.regions[0]; // Fallback to default
-    } else {
-      this.fastestRegion = fastest.region;
-    }
-    
-    this.lastRegionCheck = now;
-
-    if (this.debug) {
-      this.logger.log(`[CopilotEdge] Selected: ${this.fastestRegion.name} (${fastest.latency}ms)`);
-      const latencies = Object.fromEntries(this.regionLatencies);
-      this.logger.log('[CopilotEdge] All regions:', latencies);
-    }
-    
-    return this.fastestRegion;
+  private getCloudflareApiUrl(): string {
+    return DEFAULTS.CLOUDFLARE_API_URL;
   }
 
   /**
@@ -807,26 +730,16 @@ export class CopilotEdge {
         return cached;
       }
       
-      // Get optimal region
-      const region = await this.retryWithBackoff(
-        () => this.findFastestRegion(),
-        'region selection'
-      );
-      
       let result;
       const requestPromise = (async () => {
         // Handle different request formats
         if (body.operationName === 'generateCopilotResponse' && body.variables?.data) {
-          return await this.handleGraphQLMutation(body, region);
+          return await this.handleGraphQLMutation(body);
         } else if (body.messages && Array.isArray(body.messages)) {
-          return await this.handleDirectChat(body, region);
+          return await this.handleDirectChat(body);
         } else if (body.operationName) {
-          // This is a valid GraphQL request, but not one we have a specific
-          // handler for (e.g., a cleanup request from the client).
-          // Return a default success response to acknowledge it without error.
-          if (this.debug) {
-            this.logger.log(`[CopilotEdge] Received unhandled GraphQL operation: ${body.operationName}. Acknowledging with default response.`);
-          }
+          // This is a valid GraphQL request, but not one we have a specific handler for.
+          // Silently acknowledge it to let CopilotKit operate normally.
           return { data: {} }; // Default empty success response
         } else {
           // This should theoretically not be reached if validation is correct.
@@ -858,8 +771,7 @@ export class CopilotEdge {
           tokens_out: Math.floor(tokensOut / 4),
           cache_hit: !!cached,
           model: this.model,
-          abandoned: false,
-          region: region.name
+          abandoned: false
         });
         this.logMetrics();
       }
@@ -880,10 +792,9 @@ export class CopilotEdge {
   /**
    * Handle CopilotKit GraphQL mutations.
    * @param body - The GraphQL request body.
-   * @param region - The selected Cloudflare region.
    * @returns A GraphQL-formatted response.
    */
-  private async handleGraphQLMutation(body: any, region: Region): Promise<any> {
+  private async handleGraphQLMutation(body: any): Promise<any> {
     const sanitized = this.getSanitizedMessages(body);
 
     if (!sanitized) {
@@ -891,7 +802,7 @@ export class CopilotEdge {
     }
     
     const response = await this.retryWithBackoff(
-      async () => await this.callCloudflareAI(sanitized, region),
+      async () => await this.callCloudflareAI(sanitized),
       'Cloudflare AI'
     );
     
@@ -920,10 +831,9 @@ export class CopilotEdge {
   /**
    * Handle direct chat format requests.
    * @param body - The chat request body.
-   * @param region - The selected Cloudflare region.
    * @returns An OpenAI-compatible chat completion response.
    */
-  private async handleDirectChat(body: any, region: Region): Promise<any> {
+  private async handleDirectChat(body: any): Promise<any> {
     const sanitized = this.getSanitizedMessages(body);
 
     if (!sanitized) {
@@ -932,7 +842,7 @@ export class CopilotEdge {
     }
     
     const response = await this.retryWithBackoff(
-      async () => await this.callCloudflareAI(sanitized, region),
+      async () => await this.callCloudflareAI(sanitized),
       'Cloudflare AI'
     );
     
@@ -960,32 +870,50 @@ export class CopilotEdge {
   /**
    * Call the Cloudflare Workers AI API.
    * @param messages - The sanitized messages to send.
-   * @param region - The selected Cloudflare region.
    * @returns The AI's response content as a string.
    */
-  private async callCloudflareAI(messages: any[], region: Region): Promise<string> {
-    const baseURL = `${region.url}/client/v4/accounts/${this.accountId}/ai/v1`;
-    
-    // If we've already tried the primary model and it failed,
-    // use the fallback model if available
+  private async callCloudflareAI(messages: any[]): Promise<string> {
+    const baseURL = this.getCloudflareApiUrl();
     const activeModel = this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model;
-    
+
+    // A list of known chat-optimized model prefixes.
+    const chatModelPatterns = [
+      '@cf/meta/',
+      '@cf/mistral/',
+      '@cf/google/'
+    ];
+
+    // Determine the API format based on the model identifier.
+    // Models not in the chat list are assumed to use the general-purpose '/run' endpoint.
+    const isChatModel = chatModelPatterns.some(pattern => activeModel.startsWith(pattern));
+
+    const endpoint = isChatModel
+      ? `${baseURL}/accounts/${this.accountId}/ai/v1/chat/completions`
+      : `${baseURL}/accounts/${this.accountId}/ai/run/${activeModel}`;
+
+    const requestBody = isChatModel
+      ? { // Body for /chat/completions
+          model: activeModel,
+          messages: messages,
+          temperature: 0.7,
+          max_tokens: 1000,
+          stream: false
+        }
+      : { // Body for /run/*
+          // Collapse the message history into a single prompt for instruction-based models.
+          prompt: messages.map(msg => `${msg.role}: ${msg.content}`).join('\n\n')
+        };
+
     try {
       let response;
       try {
-        response = await this.fetch(`${baseURL}/chat/completions`, {
+        response = await this.fetch(endpoint, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${this.apiToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            model: activeModel,
-            messages: messages,
-            temperature: 0.7,
-            max_tokens: 1000,
-            stream: false
-          }),
+          body: JSON.stringify(requestBody),
           signal: AbortSignal.timeout(this.apiTimeout) // 30s timeout
         });
       } catch (fetchError: unknown) {
@@ -1034,7 +962,7 @@ export class CopilotEdge {
           this.metrics.fallbackUsed++;
           
           // Retry with fallback model
-          return await this.callCloudflareAI(messages, region);
+          return await this.callCloudflareAI(messages);
         }
         
         throw new APIError(
@@ -1052,21 +980,22 @@ export class CopilotEdge {
           : 'Unknown JSON parsing error';
         throw new APIError(`Invalid JSON response: ${errorMessage}`, 500);
       }
-    
-      if (!data.choices?.[0]?.message?.content) {
-        throw new APIError('Invalid response from Cloudflare AI', 500);
-      }
-    
-      return data.choices[0].message.content;
-    } catch (error) {
-      // If error is not API related, reset region selection
-      if (!(error instanceof APIError)) {
-        if (this.debug) {
-          this.logger.log(`[CopilotEdge] Region ${region.name} failed, re-evaluating...`);
+      
+      // Handle different response formats based on model type
+      if (isChatModel) {
+        // Standard chat models return response in choices[0].message.content
+        if (!data.choices?.[0]?.message?.content) {
+          throw new APIError('Invalid response from Cloudflare AI Chat model', 500);
         }
-        this.fastestRegion = null;
-        this.lastRegionCheck = 0;
+        return data.choices[0].message.content;
+      } else {
+        // General purpose models return a simpler response structure
+        if (data.result?.response) {
+          return data.result.response;
+        }
+        throw new APIError('Invalid response format from Cloudflare AI Run model', 500);
       }
+    } catch (error) {
       throw error;
     }
   }
@@ -1233,7 +1162,6 @@ export class CopilotEdge {
     this.clearCache();
     this.cacheLocks.clear();
     this.requestCount.clear();
-    this.regionLatencies.clear();
     // Reset circuit breaker
     this.circuitBreaker = new CircuitBreaker(
       this.circuitBreaker.failureThreshold,
@@ -1277,11 +1205,10 @@ export class CopilotEdge {
     
     console.log('  Debug:', this.debug ? 'ON' : 'OFF');
     
-    // 2. Region selection
-    console.log('\n✅ Auto-Region Selection');
-    const region = await this.findFastestRegion();
-    console.log('  Fastest:', region.name);
-    console.log('  Latencies:', Object.fromEntries(this.regionLatencies));
+    // 2. Edge routing
+    console.log('\n✅ Cloudflare Edge Routing');
+    console.log('  API URL:', this.getCloudflareApiUrl());
+    console.log('  Edge Selection: Automatic (Cloudflare)');
     
     // 3. Cache
     console.log('\n✅ Request Caching');
