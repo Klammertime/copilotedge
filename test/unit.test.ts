@@ -163,31 +163,27 @@ describe('CopilotEdge Unit Tests', () => {
       // First call - should hit the network
       const response1 = await edge.handleRequest(requestBody);
       expect(response1.choices[0].message.content).toBe('Test response');
-      expect(global.fetch).toHaveBeenCalledTimes(4); // 3 for region check, 1 for chat
+      expect(global.fetch).toHaveBeenCalledTimes(1); // No region check, just 1 for chat
       
       // Second call - should be served from cache
       const response2 = await edge.handleRequest(requestBody);
       expect(response2.choices[0].message.content).toBe('Test response');
-      // Fetch should NOT be called again for the chat or region
-      expect(global.fetch).toHaveBeenCalledTimes(4);
+      // Fetch should NOT be called again for the chat
+      expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
     it('should retry on server error and eventually fail', async () => {
       // Mock a failing API response for the chat completion
-      // The first 3 calls are for the region check, which we'll mock as successful
       vi.mocked(global.fetch)
-        .mockResolvedValueOnce(createFetchResponse({}) as any) // Region 1
-        .mockResolvedValueOnce(createFetchResponse({}) as any) // Region 2
-        .mockResolvedValueOnce(createFetchResponse({}) as any) // Region 3
-        .mockResolvedValue(createFetchResponse({ error: 'Server error' }, 500) as any); // All subsequent chat calls fail
+        .mockResolvedValue(createFetchResponse({ error: 'Server error' }, 500) as any); // All chat calls fail
 
       edge = new CopilotEdge({ apiKey: 'test', accountId: 'test', maxRetries: 3 });
       const requestBody = { messages: [{ role: 'user', content: 'test' }] };
 
       await expect(edge.handleRequest(requestBody)).rejects.toThrow();
       
-      // Fetch should be called 3 times for the region check, then 3 times for the retries
-      expect(global.fetch).toHaveBeenCalledTimes(3 + 3);
+      // Fetch should be called 3 times for the retries
+      expect(global.fetch).toHaveBeenCalledTimes(3);
     });
 
     it('should use the fallback model if the primary model fails with a 404', async () => {
@@ -195,28 +191,26 @@ describe('CopilotEdge Unit Tests', () => {
         apiKey: 'test',
         accountId: 'test',
         model: 'primary-model',
-        fallback: 'fallback-model',
+        fallback: 'fallback-model', // This will use the /run endpoint
       });
 
-      const fallbackResponse = { choices: [{ message: { content: 'Fallback response' } }] };
+      const fallbackResponse = { result: { response: 'Fallback response' } };
 
       // Mock the sequence of fetch calls
       vi.mocked(global.fetch)
-        // 3 successful region checks
-        .mockResolvedValueOnce(createFetchResponse({}) as any)
-        .mockResolvedValueOnce(createFetchResponse({}) as any)
-        .mockResolvedValueOnce(createFetchResponse({}) as any)
         // Primary model fails with 404
         .mockResolvedValueOnce(createFetchResponse({ error: 'Model not found' }, 404) as any)
         // Fallback model succeeds
-        .mockResolvedValueOnce(createFetchResponse(fallbackResponse) as any);
+        .mockResolvedValueOnce(createFetchResponse(fallbackResponse) as any)
+        // Provide an extra mock for any subsequent calls to prevent undefined responses
+        .mockResolvedValue(createFetchResponse(fallbackResponse) as any);
       
       const requestBody = { messages: [{ role: 'user', content: 'test' }] };
       const response = await edge.handleRequest(requestBody);
       
       expect(response.choices[0].message.content).toBe('Fallback response');
-      // 3 for region, 1 for primary (failed), 1 for fallback (success)
-      expect(global.fetch).toHaveBeenCalledTimes(5);
+      // 1 for primary (failed), 1 for fallback (success)
+      expect(global.fetch).toHaveBeenCalledTimes(2);
     });
   });
 
