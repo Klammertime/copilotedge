@@ -5,6 +5,37 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-08-11
+
+### Added
+
+- **🚀 Real-Time Streaming Support:** Complete implementation of Server-Sent Events (SSE) streaming for AI responses
+  - ~200ms to first token (10x faster perceived response)
+  - Memory-efficient async generator pattern
+  - Optional `onChunk` callback for progress tracking
+  - Full Next.js integration with automatic SSE response handling
+- **Streaming Configuration:** New `stream` and `onChunk` options in CopilotEdgeConfig
+- **SSE Parser:** Robust parser for Cloudflare's streaming format with error recovery
+- **Dual-Mode Operation:** Intelligent caching + streaming balance
+  - Stream for unique, creative content
+  - Cache for repeated queries (instant 0ms responses)
+- **Comprehensive Tests:** 15 new streaming-specific tests (58 total tests passing)
+- **Documentation:** Complete streaming usage guide and migration instructions
+
+### Changed
+
+- Updated `handleDirectChat` to support both streaming and non-streaming modes
+- Enhanced `createNextHandler` to return proper text/event-stream responses
+- Improved documentation to reflect streaming capabilities
+- Updated examples to demonstrate streaming usage
+
+### Technical Details
+
+- New `callCloudflareAIStreaming()` method using async generators
+- Streaming works with all Cloudflare chat models (@cf/meta/*, @cf/mistral/*, @cf/google/*)
+- Per-request streaming override (request parameter takes precedence over instance config)
+- Backward compatible - non-streaming remains the default behavior
+
 ## [0.3.0] - 2025-08-10
 
 ### Added

@@ -24,18 +24,20 @@ const reliableHandler = createCopilotEdgeHandler({
 
 ## Configuration Options
 
-| Option                           | Type      | Default                          | Description                              |
-| -------------------------------- | --------- | -------------------------------- | ---------------------------------------- |
-| `apiKey`                         | `string`  | Required                         | Cloudflare API token                     |
-| `accountId`                      | `string`  | Required                         | Cloudflare account ID                    |
-| `model`                          | `string`  | `@cf/meta/llama-3.1-8b-instruct` | AI model to use                          |
-| `provider`                       | `string`  | `cloudflare`                     | AI provider to use                       |
-| `fallback`                       | `string`  | `null`                           | Optional fallback model if primary fails |
-| `debug`                          | `boolean` | `false`                          | Enable debug logging                     |
-| `cacheTimeout`                   | `number`  | `60000`                          | Cache TTL in milliseconds                |
-| `maxRetries`                     | `number`  | `3`                              | Maximum retry attempts                   |
-| `rateLimit`                      | `number`  | `60`                             | Requests per minute limit                |
-| `enableInternalSensitiveLogging` | `boolean` | `false`                          | **DANGER**: Never use in production      |
+| Option                           | Type       | Default                          | Description                                     |
+| -------------------------------- | ---------- | -------------------------------- | ----------------------------------------------- |
+| `apiKey`                         | `string`   | Required                         | Cloudflare API token                            |
+| `accountId`                      | `string`   | Required                         | Cloudflare account ID                           |
+| `model`                          | `string`   | `@cf/meta/llama-3.1-8b-instruct` | AI model to use                                 |
+| `provider`                       | `string`   | `cloudflare`                     | AI provider to use                              |
+| `fallback`                       | `string`   | `null`                           | Optional fallback model if primary fails        |
+| `debug`                          | `boolean`  | `false`                          | Enable debug logging                            |
+| `cacheTimeout`                   | `number`   | `60000`                          | Cache TTL in milliseconds                       |
+| `maxRetries`                     | `number`   | `3`                              | Maximum retry attempts                          |
+| `rateLimit`                      | `number`   | `60`                             | Requests per minute limit                       |
+| `stream`                         | `boolean`  | `false`                          | Enable streaming responses (**NEW in v0.4.0**)  |
+| `onChunk`                        | `function` | `undefined`                      | Callback for streaming chunks (**NEW**)         |
+| `enableInternalSensitiveLogging` | `boolean`  | `false`                          | **DANGER**: Never use in production             |
 
 ## Environment Variables
 
@@ -89,6 +91,53 @@ const handler = createCopilotEdgeHandler({
   maxRetries: 5, // More aggressive retrying
 });
 ```
+
+## Streaming Configuration (NEW in v0.4.0)
+
+### Enable Streaming
+
+```typescript
+// Enable streaming globally
+const handler = createCopilotEdgeHandler({
+  apiKey: process.env.CLOUDFLARE_API_TOKEN,
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+  stream: true, // Enable streaming for all requests
+});
+
+// With progress tracking
+const handler = createCopilotEdgeHandler({
+  apiKey: process.env.CLOUDFLARE_API_TOKEN,
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+  stream: true,
+  onChunk: async (chunk) => {
+    // Process each chunk as it arrives
+    console.log('Received:', chunk.length, 'characters');
+    await updateProgressBar(chunk);
+  }
+});
+```
+
+### Per-Request Streaming
+
+```typescript
+// Override instance configuration per request
+const response = await edge.handleRequest({
+  messages: [{ role: 'user', content: 'Tell me a story' }],
+  stream: true, // Enable streaming just for this request
+});
+
+// Consume the stream
+for await (const chunk of response.stream) {
+  process.stdout.write(chunk);
+}
+```
+
+### Streaming vs Caching Trade-offs
+
+| Mode | Use When | Benefits |
+|------|----------|----------|
+| **Streaming ON** | Unique content, long responses | Real-time feedback, low memory |
+| **Streaming OFF** | Repeated queries, short responses | Instant cached responses, cost savings |
 
 ## Rate Limiting
 

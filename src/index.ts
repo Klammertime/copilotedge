@@ -1,7 +1,7 @@
 /**
  * CopilotEdge - Production-ready adapter for CopilotKit + Cloudflare Workers AI
  * @author Audrey Klammer (@Klammertime)
- * @version 0.3.0
+ * @version 0.4.0
  * @license MIT
  * 
  * Features:
@@ -139,6 +139,17 @@ export interface CopilotEdgeConfig {
    * @default 10
    */
   maxObjectDepth?: number;
+  /**
+   * Enable streaming responses from Cloudflare AI.
+   * When enabled, responses will be streamed as they are generated.
+   * @default false
+   */
+  stream?: boolean;
+  /**
+   * Callback function called for each chunk in streaming mode.
+   * Only used when stream is true.
+   */
+  onChunk?: (chunk: string) => void | Promise<void>;
 }
 
 // Region interface removed - using Cloudflare's automatic edge routing
@@ -160,6 +171,59 @@ export class APIError extends Error {
   constructor(message: string, public statusCode: number) {
     super(message);
     this.name = 'APIError';
+  }
+}
+
+/**
+ * Represents a streaming response from the AI
+ */
+export interface StreamingResponse {
+  /** Async generator that yields content chunks */
+  stream: AsyncGenerator<string, void, unknown>;
+  /** Accumulate all chunks into a complete response */
+  getFullResponse: () => Promise<string>;
+}
+
+/**
+ * Server-Sent Events (SSE) parser for streaming responses
+ */
+class SSEParser {
+  private buffer: string = '';
+
+  /**
+   * Parse SSE data from a chunk
+   */
+  parseChunk(chunk: string): Array<{ type: 'data' | 'done', content?: any }> {
+    this.buffer += chunk;
+    const lines = this.buffer.split('\n');
+    this.buffer = lines.pop() || '';
+    
+    const events: Array<{ type: 'data' | 'done', content?: any }> = [];
+    
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') {
+          events.push({ type: 'done' });
+        } else {
+          try {
+            const parsed = JSON.parse(data);
+            events.push({ type: 'data', content: parsed });
+          } catch (e) {
+            // Skip invalid JSON
+          }
+        }
+      }
+    }
+    
+    return events;
+  }
+
+  /**
+   * Reset the buffer
+   */
+  reset() {
+    this.buffer = '';
   }
 }
 
@@ -272,6 +336,8 @@ export class CopilotEdge {
   private maxMessages?: number;
   private maxMessageSize?: number;
   private maxObjectDepth?: number;
+  private stream: boolean;
+  private onChunk?: (chunk: string) => void | Promise<void>;
 
   /**
    * Creates an instance of CopilotEdge.
@@ -313,6 +379,10 @@ export class CopilotEdge {
     this.maxMessages = config.maxMessages;
     this.maxMessageSize = config.maxMessageSize;
     this.maxObjectDepth = config.maxObjectDepth;
+    
+    // Streaming settings
+    this.stream = config.stream || false;
+    this.onChunk = config.onChunk;
     
     // Validate required fields
     if (!this.apiToken) {
@@ -831,7 +901,7 @@ export class CopilotEdge {
   /**
    * Handle direct chat format requests.
    * @param body - The chat request body.
-   * @returns An OpenAI-compatible chat completion response.
+   * @returns An OpenAI-compatible chat completion response or streaming response.
    */
   private async handleDirectChat(body: any): Promise<any> {
     const sanitized = this.getSanitizedMessages(body);
@@ -841,30 +911,53 @@ export class CopilotEdge {
       throw new ValidationError('Request body must contain messages.');
     }
     
-    const response = await this.retryWithBackoff(
-      async () => await this.callCloudflareAI(sanitized),
-      'Cloudflare AI'
-    );
+    // Check if streaming is requested (from body or instance config)
+    const useStreaming = body.stream === true || (body.stream !== false && this.stream);
     
-    return {
-      id: 'chat-' + Date.now(),
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: this.model,
-      choices: [{
-        index: 0,
-        message: {
-          role: 'assistant',
-          content: response
-        },
-        finish_reason: 'stop'
-      }],
-      usage: {
-        prompt_tokens: JSON.stringify(sanitized).length / 4,
-        completion_tokens: response.length / 4,
-        total_tokens: (JSON.stringify(sanitized).length + response.length) / 4
-      }
-    };
+    if (useStreaming) {
+      // Return a streaming response
+      const streamingResponse = await this.retryWithBackoff(
+        async () => await this.callCloudflareAIStreaming(sanitized),
+        'Cloudflare AI Streaming'
+      );
+      
+      // Return the streaming response object for the caller to handle
+      return {
+        id: 'chat-' + Date.now(),
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: this.model,
+        streaming: true,
+        stream: streamingResponse.stream,
+        getFullResponse: streamingResponse.getFullResponse
+      };
+    } else {
+      // Non-streaming response (existing code)
+      const response = await this.retryWithBackoff(
+        async () => await this.callCloudflareAI(sanitized),
+        'Cloudflare AI'
+      );
+      
+      return {
+        id: 'chat-' + Date.now(),
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: this.model,
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: response
+          },
+          finish_reason: 'stop'
+        }],
+        usage: {
+          prompt_tokens: JSON.stringify(sanitized).length / 4,
+          completion_tokens: response.length / 4,
+          total_tokens: (JSON.stringify(sanitized).length + response.length) / 4
+        }
+      };
+    }
   }
 
   /**
@@ -1001,6 +1094,116 @@ export class CopilotEdge {
   }
 
   /**
+   * Call the Cloudflare Workers AI API with streaming support.
+   * @param messages - The sanitized messages to send.
+   * @returns A streaming response that can be consumed as an async generator.
+   */
+  private async callCloudflareAIStreaming(messages: any[]): Promise<StreamingResponse> {
+    const baseURL = this.getCloudflareApiUrl();
+    const activeModel = this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model;
+
+    // Determine if this is a chat model
+    const chatModelPatterns = ['@cf/meta/', '@cf/mistral/', '@cf/google/'];
+    const isChatModel = chatModelPatterns.some(pattern => activeModel.startsWith(pattern));
+
+    const endpoint = isChatModel
+      ? `${baseURL}/accounts/${this.accountId}/ai/v1/chat/completions`
+      : `${baseURL}/accounts/${this.accountId}/ai/run/${activeModel}`;
+
+    const requestBody = isChatModel
+      ? {
+          model: activeModel,
+          messages: messages,
+          temperature: 0.7,
+          max_tokens: 1000,
+          stream: true // Enable streaming
+        }
+      : {
+          prompt: messages.map(msg => `${msg.role}: ${msg.content}`).join('\n\n'),
+          stream: true // Enable streaming for run endpoint too
+        };
+
+    const response = await this.fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(this.apiTimeout)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Could not read error response');
+      throw new APIError(`Cloudflare AI error: ${errorText}`, response.status);
+    }
+
+    if (!response.body) {
+      throw new APIError('No response body for streaming', 500);
+    }
+
+    // Create the streaming response
+    const parser = new SSEParser();
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let accumulated = '';
+
+    const stream = async function* (this: CopilotEdge) {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const events = parser.parseChunk(chunk);
+
+          for (const event of events) {
+            if (event.type === 'done') {
+              return;
+            }
+            if (event.type === 'data' && event.content) {
+              // Extract content from the response
+              let content = '';
+              if (isChatModel && event.content.choices?.[0]?.delta?.content) {
+                content = event.content.choices[0].delta.content;
+              } else if (event.content.response) {
+                content = event.content.response;
+              } else if (event.content.text) {
+                content = event.content.text;
+              }
+
+              if (content) {
+                accumulated += content;
+                // Call the onChunk callback if provided
+                if (this.onChunk) {
+                  await this.onChunk(content);
+                }
+                yield content;
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }.bind(this);
+
+    return {
+      stream: stream(),
+      getFullResponse: async () => {
+        // Consume the entire stream if not already consumed
+        if (accumulated) return accumulated;
+        // Consume stream to populate accumulated
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        for await (const _chunk of stream()) {
+          // Stream is consumed, accumulated is updated
+        }
+        return accumulated;
+      }
+    };
+  }
+
+  /**
    * Create a default response for when there are no messages to process.
    * @param threadId The thread ID from the request.
    * @returns A default GraphQL response.
@@ -1090,6 +1293,79 @@ export class CopilotEdge {
           }
         }
         
+        // Check if this is a streaming response
+        if (result.streaming && result.stream) {
+          // Create a streaming response using Server-Sent Events
+          const encoder = new TextEncoder();
+          const stream = new ReadableStream({
+            async start(controller) {
+              try {
+                // Send initial metadata
+                const initData = `data: ${JSON.stringify({
+                  id: result.id,
+                  object: 'chat.completion.chunk',
+                  created: result.created,
+                  model: result.model,
+                  choices: [{
+                    index: 0,
+                    delta: { role: 'assistant' },
+                    finish_reason: null
+                  }]
+                })}\n\n`;
+                controller.enqueue(encoder.encode(initData));
+                
+                // Stream the content chunks
+                for await (const chunk of result.stream) {
+                  const chunkData = `data: ${JSON.stringify({
+                    id: result.id,
+                    object: 'chat.completion.chunk',
+                    created: result.created,
+                    model: result.model,
+                    choices: [{
+                      index: 0,
+                      delta: { content: chunk },
+                      finish_reason: null
+                    }]
+                  })}\n\n`;
+                  controller.enqueue(encoder.encode(chunkData));
+                }
+                
+                // Send the final chunk
+                const doneData = `data: ${JSON.stringify({
+                  id: result.id,
+                  object: 'chat.completion.chunk',
+                  created: result.created,
+                  model: result.model,
+                  choices: [{
+                    index: 0,
+                    delta: {},
+                    finish_reason: 'stop'
+                  }]
+                })}\n\ndata: [DONE]\n\n`;
+                controller.enqueue(encoder.encode(doneData));
+                controller.close();
+              } catch (error) {
+                controller.error(error);
+              }
+            }
+          });
+          
+          return new NextResponse(stream, {
+            headers: {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache, no-transform',
+              'Connection': 'keep-alive',
+              'X-Powered-By': 'CopilotEdge',
+              'X-Streaming': 'true',
+              'X-Content-Type-Options': 'nosniff',
+              'X-Frame-Options': 'DENY',
+              'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+              'Referrer-Policy': 'strict-origin-when-cross-origin'
+            }
+          });
+        }
+        
+        // Non-streaming response
         return NextResponse.json(result, {
           headers: {
             'X-Powered-By': 'CopilotEdge',

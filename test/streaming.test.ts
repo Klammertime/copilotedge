@@ -1,12 +1,11 @@
 /**
  * Tests for Cloudflare streaming API support
- * Prepares the test infrastructure for streaming responses
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CopilotEdge } from '../dist/index';
 
-describe('CopilotEdge Streaming Support (Preparation)', () => {
+describe('CopilotEdge Streaming Support', () => {
   beforeEach(() => {
     // Mock streaming response from Cloudflare API
     const createStreamingResponse = (chunks: string[]) => {
@@ -77,11 +76,12 @@ describe('CopilotEdge Streaming Support (Preparation)', () => {
       };
     });
 
-    // Create edge instance for potential future use in tests
+    // Create edge instance to validate configuration
     new CopilotEdge({
       apiKey: 'test-key',
       accountId: 'test-account',
       debug: false,
+      stream: false, // Default to non-streaming
       fetch: mockFetch as any
     });
   });
@@ -171,6 +171,126 @@ describe('CopilotEdge Streaming Support (Preparation)', () => {
       
       expect(streamingRequest.stream).toBe(true);
       expect(nonStreamingRequest.stream).toBe(false);
+    });
+  });
+
+  describe('Streaming Functionality', () => {
+    it('should handle streaming request when stream is true', async () => {
+      const streamingEdge = new CopilotEdge({
+        apiKey: 'test-key',
+        accountId: 'test-account',
+        stream: true,
+        fetch: (async (_url: string, options: any) => {
+          const body = JSON.parse(options.body);
+          expect(body.stream).toBe(true);
+          
+          // Return a mock streaming response
+          const encoder = new TextEncoder();
+          const stream = new ReadableStream({
+            async pull(controller) {
+              controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'));
+              controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":" world"}}]}\n\n'));
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+            }
+          });
+          
+          return {
+            ok: true,
+            status: 200,
+            body: stream,
+            headers: new Headers({ 'content-type': 'text/event-stream' })
+          };
+        }) as any
+      });
+      
+      const response = await streamingEdge.handleRequest({
+        messages: [{ role: 'user', content: 'test' }]
+      });
+      
+      expect(response.streaming).toBe(true);
+      expect(response.stream).toBeDefined();
+      expect(response.object).toBe('chat.completion.chunk');
+    });
+
+    it('should accumulate chunks correctly', async () => {
+      const chunks: string[] = [];
+      const streamingEdge = new CopilotEdge({
+        apiKey: 'test-key',
+        accountId: 'test-account',
+        stream: true,
+        onChunk: async (chunk: string) => {
+          chunks.push(chunk);
+        },
+        fetch: (async (_url: string, _options: any) => {
+          const encoder = new TextEncoder();
+          const stream = new ReadableStream({
+            async pull(controller) {
+              controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'));
+              controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":" "}}]}\n\n'));
+              controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"world"}}]}\n\n'));
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+            }
+          });
+          
+          return {
+            ok: true,
+            status: 200,
+            body: stream,
+            headers: new Headers({ 'content-type': 'text/event-stream' })
+          };
+        }) as any
+      });
+      
+      const response = await streamingEdge.handleRequest({
+        messages: [{ role: 'user', content: 'test' }]
+      });
+      
+      // Consume the stream
+      if (response.stream) {
+        for await (const chunk of response.stream) {
+          // Stream is being consumed
+          expect(chunk).toBeDefined();
+        }
+      }
+      
+      expect(chunks).toEqual(['Hello', ' ', 'world']);
+    });
+
+    it('should respect stream parameter in request body over config', async () => {
+      const nonStreamingEdge = new CopilotEdge({
+        apiKey: 'test-key',
+        accountId: 'test-account',
+        stream: false, // Config says no streaming
+        fetch: (async (_url: string, options: any) => {
+          const body = JSON.parse(options.body);
+          expect(body.stream).toBe(true); // But request says yes
+          
+          const encoder = new TextEncoder();
+          const stream = new ReadableStream({
+            async pull(controller) {
+              controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"test"}}]}\n\n'));
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+            }
+          });
+          
+          return {
+            ok: true,
+            status: 200,
+            body: stream,
+            headers: new Headers({ 'content-type': 'text/event-stream' })
+          };
+        }) as any
+      });
+      
+      const response = await nonStreamingEdge.handleRequest({
+        messages: [{ role: 'user', content: 'test' }],
+        stream: true // Request overrides config
+      });
+      
+      expect(response.streaming).toBe(true);
     });
   });
 

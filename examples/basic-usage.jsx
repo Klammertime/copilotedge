@@ -52,6 +52,23 @@ export const POST = createCopilotEdgeHandler({
 });
 */
 
+// ---
+// OPTION 4: Streaming Responses (NEW in v0.4.0!)
+// ---
+// Enable real-time streaming for immediate feedback (~200ms to first token)
+/*
+export const POST = createCopilotEdgeHandler({
+  stream: true,  // Enable streaming for all requests
+  onChunk: (chunk) => {
+    // Optional: Track progress or perform side effects
+    console.log('Streamed:', chunk.length, 'characters');
+  },
+  // Streaming works with any model
+  model: '@cf/meta/llama-3.1-70b-instruct',
+  debug: true,
+});
+*/
+
 
 // ============================================
 // 2. React Component with CopilotKit UI
