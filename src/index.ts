@@ -771,16 +771,16 @@ export class CopilotEdge {
     this.metrics.totalRequests++;
     
     try {
-      // Allow GraphQL introspection queries to pass through validation
+      // Validate request FIRST to catch null/invalid types.
+      this.validateRequest(body);
+      
+      // Allow GraphQL introspection queries to pass through without caching, etc.
       if (body.operationName === 'IntrospectionQuery') {
         if (this.debug) {
           this.logger.log('[CopilotEdge] Received GraphQL IntrospectionQuery, returning minimal schema.');
         }
         return this.createIntrospectionResponse();
       }
-
-      // Validate request
-      this.validateRequest(body);
       
       // Check rate limit
       this.checkRateLimit();
@@ -820,7 +820,16 @@ export class CopilotEdge {
           return await this.handleGraphQLMutation(body, region);
         } else if (body.messages && Array.isArray(body.messages)) {
           return await this.handleDirectChat(body, region);
+        } else if (body.operationName) {
+          // This is a valid GraphQL request, but not one we have a specific
+          // handler for (e.g., a cleanup request from the client).
+          // Return a default success response to acknowledge it without error.
+          if (this.debug) {
+            this.logger.log(`[CopilotEdge] Received unhandled GraphQL operation: ${body.operationName}. Acknowledging with default response.`);
+          }
+          return { data: {} }; // Default empty success response
         } else {
+          // This should theoretically not be reached if validation is correct.
           throw new ValidationError('Unsupported request format');
         }
       })();
@@ -962,24 +971,47 @@ export class CopilotEdge {
     const activeModel = this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model;
     
     try {
-      const response = await this.fetch(`${baseURL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: activeModel,
-          messages: messages,
-          temperature: 0.7,
-          max_tokens: 1000,
-          stream: false
-        }),
-        signal: AbortSignal.timeout(this.apiTimeout) // 30s timeout
-      });
+      let response;
+      try {
+        response = await this.fetch(`${baseURL}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${this.apiToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: activeModel,
+            messages: messages,
+            temperature: 0.7,
+            max_tokens: 1000,
+            stream: false
+          }),
+          signal: AbortSignal.timeout(this.apiTimeout) // 30s timeout
+        });
+      } catch (fetchError: unknown) {
+        // Handle fetch errors (network issues, etc.)
+        const errorMessage = fetchError instanceof Error 
+          ? fetchError.message 
+          : 'Unknown fetch error';
+        
+        if (this.debug) {
+          this.logger.log(`[CopilotEdge] Fetch error: ${errorMessage}`);
+        }
+        throw new APIError(`Fetch error: ${errorMessage}`, 500);
+      }
+
+      // Check if response is defined before accessing properties
+      if (!response) {
+        throw new APIError('Empty response from Cloudflare AI', 500);
+      }
 
       if (!response.ok) {
-        const error = await response.text();
+        let errorText = '';
+        try {
+          errorText = await response.text();
+        } catch (e) {
+          errorText = 'Could not read error response';
+        }
         
         // If we get a 404 (model not found) or a 429 (rate limit exceeded),
         // and we have a fallback model, and we haven't tried the fallback yet,
@@ -1006,12 +1038,20 @@ export class CopilotEdge {
         }
         
         throw new APIError(
-          `Cloudflare AI error: ${error}`,
+          `Cloudflare AI error: ${errorText}`,
           response.status
         );
       }
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonError: unknown) {
+        const errorMessage = jsonError instanceof Error
+          ? jsonError.message
+          : 'Unknown JSON parsing error';
+        throw new APIError(`Invalid JSON response: ${errorMessage}`, 500);
+      }
     
       if (!data.choices?.[0]?.message?.content) {
         throw new APIError('Invalid response from Cloudflare AI', 500);
