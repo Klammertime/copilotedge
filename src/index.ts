@@ -1,7 +1,7 @@
 /**
  * CopilotEdge - Production-ready adapter for CopilotKit + Cloudflare Workers AI
  * @author Audrey Klammer (@Klammertime)
- * @version 0.4.0
+ * @version 0.5.0
  * @license MIT
  * 
  * Features:
@@ -150,6 +150,41 @@ export interface CopilotEdgeConfig {
    * Only used when stream is true.
    */
   onChunk?: (chunk: string) => void | Promise<void>;
+  /**
+   * Cloudflare Workers KV namespace for persistent caching.
+   * When provided, cache will persist across all edge locations globally.
+   * @example env.COPILOT_CACHE (bind in wrangler.toml)
+   */
+  kvNamespace?: KVNamespace;
+  /**
+   * TTL for KV cache entries in seconds.
+   * KV has a minimum TTL of 60 seconds.
+   * @default 86400 (24 hours)
+   */
+  kvCacheTTL?: number;
+  /**
+   * Prefix for KV cache keys to avoid collisions.
+   * @default 'copilotedge:'
+   */
+  kvCachePrefix?: string;
+}
+
+/**
+ * Cloudflare Workers KV Namespace interface
+ * This is the standard KV interface provided by Cloudflare Workers runtime
+ */
+export interface KVNamespace {
+  get(key: string, options?: { type?: 'text' | 'json' | 'arrayBuffer' | 'stream' }): Promise<any>;
+  put(key: string, value: string | ArrayBuffer | ReadableStream, options?: { 
+    expirationTtl?: number;
+    metadata?: any;
+  }): Promise<void>;
+  delete(key: string): Promise<void>;
+  list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
+    keys: Array<{ name: string; metadata?: any }>;
+    list_complete: boolean;
+    cursor?: string;
+  }>;
 }
 
 // Region interface removed - using Cloudflare's automatic edge routing
@@ -252,6 +287,8 @@ const DEFAULTS = {
   JITTER: 500, // 0.5 seconds
   CIRCUIT_BREAKER_FAILURE_THRESHOLD: 5,
   CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT: 30000, // 30 seconds
+  KV_CACHE_TTL: 86400, // 24 hours (KV minimum is 60 seconds)
+  KV_CACHE_PREFIX: 'copilotedge:'
 };
 
 /**
@@ -338,6 +375,9 @@ export class CopilotEdge {
   private maxObjectDepth?: number;
   private stream: boolean;
   private onChunk?: (chunk: string) => void | Promise<void>;
+  private kvNamespace?: KVNamespace;
+  private kvCacheTTL: number;
+  private kvCachePrefix: string;
 
   /**
    * Creates an instance of CopilotEdge.
@@ -383,6 +423,11 @@ export class CopilotEdge {
     // Streaming settings
     this.stream = config.stream || false;
     this.onChunk = config.onChunk;
+    
+    // KV settings
+    this.kvNamespace = config.kvNamespace;
+    this.kvCacheTTL = config.kvCacheTTL || 86400; // 24 hours default
+    this.kvCachePrefix = config.kvCachePrefix || 'copilotedge:';
     
     // Validate required fields
     if (!this.apiToken) {
@@ -456,18 +501,41 @@ export class CopilotEdge {
 
   /**
    * Get cached response if available and not expired.
+   * Checks KV first (if available), then falls back to in-memory cache.
    * @param key - The cache key.
    * @returns The cached data or null if not found.
    */
-  private getFromCache(key: string): any {
+  private async getFromCache(key: string): Promise<any> {
+    // Try KV cache first if available
+    if (this.kvNamespace) {
+      try {
+        const kvKey = this.kvCachePrefix + key;
+        const kvData = await this.kvNamespace.get(kvKey, { type: 'json' });
+        
+        if (kvData) {
+          this.metrics.cacheHits++;
+          if (this.debug) {
+            this.logger.log(`[CopilotEdge] KV Cache HIT (global persistent cache)`);
+          }
+          return { ...kvData, cached: true, cacheType: 'kv' };
+        }
+      } catch (error) {
+        if (this.debug) {
+          this.logger.warn('[CopilotEdge] KV cache read failed:', error);
+        }
+        // Fall through to in-memory cache
+      }
+    }
+
+    // Fall back to in-memory cache
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
       this.metrics.cacheHits++;
       if (this.debug) {
         const age = Math.round((Date.now() - cached.timestamp) / 1000);
-        this.logger.log(`[CopilotEdge] Cache HIT (age: ${age}s, saved 1 API call)`);
+        this.logger.log(`[CopilotEdge] Memory Cache HIT (age: ${age}s)`);
       }
-      return { ...cached.data, cached: true };
+      return { ...cached.data, cached: true, cacheType: 'memory' };
     }
 
     return null;
@@ -475,10 +543,12 @@ export class CopilotEdge {
 
   /**
    * Save response to cache with LRU eviction.
+   * Saves to both KV (if available) and in-memory cache.
    * @param key - The cache key.
    * @param data - The data to cache.
    */
-  private saveToCache(key: string, data: any): void {
+  private async saveToCache(key: string, data: any): Promise<void> {
+    // Save to in-memory cache (always)
     this.cache.set(key, {
       data,
       timestamp: Date.now()
@@ -489,6 +559,34 @@ export class CopilotEdge {
       const firstKey = this.cache.keys().next().value;
       if (firstKey) {
         this.cache.delete(firstKey);
+      }
+    }
+    
+    // Save to KV if available (persistent across all edge locations)
+    if (this.kvNamespace) {
+      try {
+        const kvKey = this.kvCachePrefix + key;
+        // KV requires string or ArrayBuffer, so stringify the data
+        await this.kvNamespace.put(
+          kvKey, 
+          JSON.stringify(data),
+          { 
+            expirationTtl: this.kvCacheTTL,
+            metadata: { 
+              timestamp: Date.now(),
+              model: this.model 
+            }
+          }
+        );
+        
+        if (this.debug) {
+          this.logger.log(`[CopilotEdge] Saved to KV cache (TTL: ${this.kvCacheTTL}s, global persistence)`);
+        }
+      } catch (error) {
+        if (this.debug) {
+          this.logger.warn('[CopilotEdge] KV cache write failed:', error);
+        }
+        // Continue even if KV fails - in-memory cache still works
       }
     }
   }
@@ -789,7 +887,7 @@ export class CopilotEdge {
       }
 
       // Check cache
-      const cached = this.getFromCache(cacheKey);
+      const cached = await this.getFromCache(cacheKey);
       if (cached) {
         const latency = Math.round(performance.now() - start);
         this.updateMetrics(latency);
@@ -822,7 +920,7 @@ export class CopilotEdge {
       try {
         result = await requestPromise;
         // Cache successful response
-        this.saveToCache(cacheKey, result);
+        await this.saveToCache(cacheKey, result);
       } finally {
         // Remove the lock
         this.cacheLocks.delete(cacheKey);
@@ -1422,20 +1520,47 @@ export class CopilotEdge {
   }
 
   /**
-   * Clears the in-memory cache.
+   * Clears the in-memory cache and optionally KV cache.
+   * @param clearKV - Whether to also clear KV cache (requires listing all keys).
    */
-  public clearCache(): void {
+  public async clearCache(clearKV: boolean = false): Promise<void> {
+    // Clear in-memory cache
     this.cache.clear();
+    
+    // Clear KV cache if requested and available
+    if (clearKV && this.kvNamespace) {
+      try {
+        // List all keys with our prefix
+        const list = await this.kvNamespace.list({ 
+          prefix: this.kvCachePrefix,
+          limit: 1000 
+        });
+        
+        // Delete all found keys
+        for (const key of list.keys) {
+          await this.kvNamespace.delete(key.name);
+        }
+        
+        if (this.debug) {
+          this.logger.log(`[CopilotEdge] Cleared ${list.keys.length} KV cache entries`);
+        }
+      } catch (error) {
+        if (this.debug) {
+          this.logger.warn('[CopilotEdge] KV cache clear failed:', error);
+        }
+      }
+    }
+    
     if (this.debug) {
-      this.logger.log('[CopilotEdge] Cache cleared');
+      this.logger.log(`[CopilotEdge] Cache cleared (memory: yes, KV: ${clearKV ? 'yes' : 'no'})`);
     }
   }
 
   /**
    * Cleanup method to prevent memory leaks
    */
-  public destroy(): void {
-    this.clearCache();
+  public async destroy(): Promise<void> {
+    await this.clearCache(false); // Don't clear KV on destroy - it's persistent
     this.cacheLocks.clear();
     this.requestCount.clear();
     // Reset circuit breaker
@@ -1489,10 +1614,16 @@ export class CopilotEdge {
     // 3. Cache
     console.log('\n✅ Request Caching');
     const testKey = 'test-' + Date.now();
-    this.saveToCache(testKey, { test: 'data' });
-    const cached = this.getFromCache(testKey);
+    await this.saveToCache(testKey, { test: 'data' });
+    const cached = await this.getFromCache(testKey);
     console.log('  Cache:', cached ? 'Working' : 'Failed');
     console.log('  TTL:', this.cacheTimeout / 1000, 'seconds');
+    if (this.kvNamespace) {
+      console.log('  KV:', 'Enabled (persistent global cache)');
+      console.log('  KV TTL:', this.kvCacheTTL / 60, 'minutes');
+    } else {
+      console.log('  KV:', 'Disabled (use wrangler.toml to enable)');
+    }
     
     // 4. Rate limiting
     console.log('\n✅ Rate Limiting');

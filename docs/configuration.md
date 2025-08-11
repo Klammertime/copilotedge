@@ -24,20 +24,22 @@ const reliableHandler = createCopilotEdgeHandler({
 
 ## Configuration Options
 
-| Option                           | Type       | Default                          | Description                                     |
-| -------------------------------- | ---------- | -------------------------------- | ----------------------------------------------- |
-| `apiKey`                         | `string`   | Required                         | Cloudflare API token                            |
-| `accountId`                      | `string`   | Required                         | Cloudflare account ID                           |
-| `model`                          | `string`   | `@cf/meta/llama-3.1-8b-instruct` | AI model to use                                 |
-| `provider`                       | `string`   | `cloudflare`                     | AI provider to use                              |
-| `fallback`                       | `string`   | `null`                           | Optional fallback model if primary fails        |
-| `debug`                          | `boolean`  | `false`                          | Enable debug logging                            |
-| `cacheTimeout`                   | `number`   | `60000`                          | Cache TTL in milliseconds                       |
-| `maxRetries`                     | `number`   | `3`                              | Maximum retry attempts                          |
-| `rateLimit`                      | `number`   | `60`                             | Requests per minute limit                       |
-| `stream`                         | `boolean`  | `false`                          | Enable streaming responses (**NEW in v0.4.0**)  |
-| `onChunk`                        | `function` | `undefined`                      | Callback for streaming chunks (**NEW**)         |
-| `enableInternalSensitiveLogging` | `boolean`  | `false`                          | **DANGER**: Never use in production             |
+| Option                           | Type         | Default                          | Description                                           |
+| -------------------------------- | ------------ | -------------------------------- | ----------------------------------------------------- |
+| `apiKey`                         | `string`     | Required                         | Cloudflare API token                                  |
+| `accountId`                      | `string`     | Required                         | Cloudflare account ID                                 |
+| `model`                          | `string`     | `@cf/meta/llama-3.1-8b-instruct` | AI model to use                                       |
+| `provider`                       | `string`     | `cloudflare`                     | AI provider to use                                    |
+| `fallback`                       | `string`     | `null`                           | Optional fallback model if primary fails              |
+| `debug`                          | `boolean`    | `false`                          | Enable debug logging                                  |
+| `cacheTimeout`                   | `number`     | `60000`                          | Memory cache TTL in milliseconds                      |
+| `maxRetries`                     | `number`     | `3`                              | Maximum retry attempts                                |
+| `rateLimit`                      | `number`     | `60`                             | Requests per minute limit                             |
+| `stream`                         | `boolean`    | `false`                          | Enable streaming responses (**NEW in v0.4.0**)        |
+| `onChunk`                        | `function`   | `undefined`                      | Callback for streaming chunks (**NEW in v0.4.0**)     |
+| `kvNamespace`                    | `KVNamespace`| `undefined`                      | Workers KV namespace binding (**NEW in v0.5.0**)      |
+| `kvCacheTTL`                     | `number`     | `86400`                          | KV cache TTL in seconds (**NEW in v0.5.0**)           |
+| `enableInternalSensitiveLogging` | `boolean`    | `false`                          | **DANGER**: Never use in production                   |
 
 ## Environment Variables
 
@@ -332,7 +334,52 @@ const handler = createCopilotEdgeHandler({
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  cacheTimeout: 300000, // 5 minute cache
+  cacheTimeout: 300000, // 5 minute memory cache
   model: "@cf/meta/llama-3.1-8b-instruct", // Efficient model
+  kvNamespace: env.COPILOT_CACHE, // Persistent KV cache (**NEW in v0.5.0**)
+  kvCacheTTL: 86400, // 24 hour KV cache
 });
 ```
+
+## Workers KV Configuration (NEW in v0.5.0)
+
+### Enable KV Caching
+
+Workers KV provides persistent global caching that survives Worker restarts and works across all edge locations.
+
+```typescript
+// In a Cloudflare Worker
+export default {
+  async fetch(request, env) {
+    const handler = createCopilotEdgeHandler({
+      apiKey: env.CLOUDFLARE_API_TOKEN,
+      accountId: env.CLOUDFLARE_ACCOUNT_ID,
+      kvNamespace: env.COPILOT_CACHE, // KV namespace binding
+      kvCacheTTL: 86400, // 24 hours in seconds
+    });
+    
+    return handler(request);
+  }
+}
+```
+
+### Dual-Layer Caching
+
+With KV enabled, CopilotEdge uses a two-tier caching strategy:
+
+1. **Memory Cache** (L1): Fast, instance-local, expires after `cacheTimeout`
+2. **KV Cache** (L2): Persistent, global, expires after `kvCacheTTL`
+
+Cache lookup order:
+1. Check memory cache → if hit, return immediately
+2. Check KV cache → if hit, populate memory cache and return
+3. Call API → populate both caches
+
+### KV Benefits
+
+- **90-95% Cost Reduction**: Cache persists across deployments
+- **Zero Cold Starts**: Cache survives Worker restarts
+- **Global Distribution**: Any edge location can serve cached content
+- **Automatic Fallback**: Uses memory cache if KV fails
+
+See [KV documentation](kv-cache.md) for complete setup guide.

@@ -14,7 +14,7 @@ describe('Memory Leak Prevention', () => {
   });
 
   describe('Resource Cleanup on Destroy', () => {
-    it('should clear all caches on destroy', () => {
+    it('should clear all caches on destroy', async () => {
       // Populate caches
       (edge as any).cache.set('cache-key', { data: 'test', timestamp: Date.now() });
       (edge as any).cacheLocks.set('lock-key', Promise.resolve());
@@ -26,13 +26,13 @@ describe('Memory Leak Prevention', () => {
       expect((edge as any).requestCount.size).toBe(1);
 
       // Destroy and verify cleanup
-      edge.destroy();
+      await edge.destroy();
       expect((edge as any).cache.size).toBe(0);
       expect((edge as any).cacheLocks.size).toBe(0);
       expect((edge as any).requestCount.size).toBe(0);
     });
 
-    it('should reset circuit breaker on destroy', () => {
+    it('should reset circuit breaker on destroy', async () => {
       // Trip the circuit breaker
       const circuitBreaker = (edge as any).circuitBreaker;
       for (let i = 0; i < circuitBreaker.failureThreshold; i++) {
@@ -41,12 +41,12 @@ describe('Memory Leak Prevention', () => {
       expect((circuitBreaker as any).state).toBe('open');
 
       // Destroy and check
-      edge.destroy();
+      await edge.destroy();
       const newCircuitBreaker = (edge as any).circuitBreaker;
       expect(newCircuitBreaker.state).toBe('closed');
     });
 
-    it('should log cleanup in debug mode', () => {
+    it('should log cleanup in debug mode', async () => {
       const consoleSpy = vi.spyOn(console, 'log');
       const debugEdge = new CopilotEdge({
         apiKey: 'test-key',
@@ -54,7 +54,7 @@ describe('Memory Leak Prevention', () => {
         debug: true,
       });
 
-      debugEdge.destroy();
+      await debugEdge.destroy();
 
       expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Cache cleared'));
       expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Instance destroyed'));
