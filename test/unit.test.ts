@@ -1,6 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import CopilotEdge, { ValidationError } from '../src/index';
 
+// Import crypto for use in tests
+import * as nodeCrypto from 'node:crypto';
+
+// Mock crypto.subtle.digest for the hashRequest method
+const mockDigest = vi.fn().mockImplementation(async (algorithm, data) => {
+  return nodeCrypto.createHash('sha256').update(new Uint8Array(data)).digest();
+});
+
+// Mock the crypto API
+vi.stubGlobal('crypto', {
+  subtle: {
+    digest: mockDigest
+  },
+  randomUUID: nodeCrypto.randomUUID
+});
+
+// Ensure AbortSignal.timeout is available
+if (!AbortSignal.timeout) {
+  AbortSignal.timeout = (ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  };
+}
+
 // Mock the global fetch function
 global.fetch = vi.fn();
 

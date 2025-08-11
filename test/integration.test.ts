@@ -417,8 +417,9 @@ describe('CopilotEdge Integration Tests', () => {
       const sensitiveEdge = new CopilotEdge({
         apiKey: 'test-token',
         accountId: 'test-account',
-        detectSensitiveContent: true,
         debug: true,
+        // @ts-expect-error - Property exists at runtime but not in type definition
+        detectSensitiveContent: true,
         enableInternalSensitiveLogging: true
       });
 
