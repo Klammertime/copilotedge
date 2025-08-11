@@ -30,7 +30,17 @@ export function createOpenAIHandler() {
     
     // Enable debug logging to see detailed information about requests,
     // cache hits, and fallbacks in your server logs.
-    debug: true
+    debug: true,
+    
+    // Optional: Enable streaming for real-time responses (v0.4.0+)
+    // stream: true,
+    
+    // Optional: Add Workers KV for persistent caching (v0.5.0+)
+    // kvNamespace: env.COPILOT_CACHE,
+    
+    // Optional: Enable Durable Objects for conversation persistence (v0.6.0+)
+    // conversationDO: env.CONVERSATION_DO,
+    // enableConversations: true,
   });
 }
 

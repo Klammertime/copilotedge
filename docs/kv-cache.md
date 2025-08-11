@@ -15,7 +15,7 @@ Workers KV provides a globally distributed, persistent key-value store that enab
 
 - Cloudflare account with Workers enabled
 - Wrangler CLI installed (`npm install -g wrangler`)
-- CopilotEdge v0.5.0 or later
+- CopilotEdge v0.5.0 or later (v0.6.0 adds Durable Objects)
 
 ## Setup Steps
 

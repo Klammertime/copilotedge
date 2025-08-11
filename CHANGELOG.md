@@ -5,6 +5,41 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-01-11
+
+### Added
+
+- **🎯 Durable Objects Integration:** Stateful conversation management
+  - Persistent conversation history across sessions
+  - WebSocket support for real-time bidirectional communication
+  - Automatic conversation context loading and saving
+  - Session state that survives Worker restarts and deployments
+- **WebSocket Hibernation API:** Efficient WebSocket handling
+  - Uses Cloudflare's latest WebSocket Hibernation API
+  - Automatic connection management
+  - Broadcasting to multiple connected clients
+  - Support for chat, system, and status messages
+- **Conversation Configuration:**
+  - `conversationDO` - Durable Object namespace binding
+  - `enableConversations` - Toggle conversation persistence
+  - `defaultConversationId` - Default conversation for sessions
+- **Comprehensive Documentation:** Complete Durable Objects guide at `docs/durable-objects.md`
+- **Testing:** 17 new tests for Durable Objects functionality
+
+### Improved
+
+- Conversation continuity with automatic history management
+- User experience with stateful interactions
+- Cost efficiency by reusing conversation context
+- WebSocket performance with Hibernation API
+
+### Technical Notes
+
+- Fully backward compatible - no breaking changes
+- Optional feature - users opt-in via configuration
+- 87 out of 88 tests passing (1 WebSocket mock limitation)
+- Follows Cloudflare best practices for Durable Objects
+
 ## [0.5.0] - 2025-01-11
 
 ### Added

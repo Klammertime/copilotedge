@@ -69,6 +69,35 @@ export const POST = createCopilotEdgeHandler({
 });
 */
 
+// ---
+// OPTION 5: With Durable Objects (NEW in v0.6.0!)
+// ---
+// Enable persistent conversation management with Durable Objects.
+// This requires a Cloudflare Workers environment.
+/*
+// In your Worker file (not Next.js API route):
+import { createCopilotEdgeHandler, ConversationDO } from 'copilotedge';
+
+export { ConversationDO }; // Export the DO class
+
+export default {
+  async fetch(request, env) {
+    const handler = createCopilotEdgeHandler({
+      apiKey: env.CLOUDFLARE_API_TOKEN,
+      accountId: env.CLOUDFLARE_ACCOUNT_ID,
+      conversationDO: env.CONVERSATION_DO,     // Durable Object namespace
+      enableConversations: true,               // Enable conversation persistence
+      defaultConversationId: 'user-session',   // Default conversation ID
+      model: '@cf/openai/gpt-oss-120b',       // Use a powerful model
+      kvNamespace: env.COPILOT_CACHE,         // Optional: KV for caching
+      stream: true,                            // Enable streaming
+    });
+    
+    return handler(request);
+  }
+};
+*/
+
 
 // ============================================
 // 2. React Component with CopilotKit UI

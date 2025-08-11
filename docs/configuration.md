@@ -39,6 +39,9 @@ const reliableHandler = createCopilotEdgeHandler({
 | `onChunk`                        | `function`   | `undefined`                      | Callback for streaming chunks (**NEW in v0.4.0**)     |
 | `kvNamespace`                    | `KVNamespace`| `undefined`                      | Workers KV namespace binding (**NEW in v0.5.0**)      |
 | `kvCacheTTL`                     | `number`     | `86400`                          | KV cache TTL in seconds (**NEW in v0.5.0**)           |
+| `conversationDO`                 | `DurableObjectNamespace` | `undefined`              | Durable Object namespace (**NEW in v0.6.0**)          |
+| `enableConversations`            | `boolean`    | `false`                          | Enable conversation persistence (**NEW in v0.6.0**)   |
+| `defaultConversationId`          | `string`     | `undefined`                      | Default conversation ID (**NEW in v0.6.0**)           |
 | `enableInternalSensitiveLogging` | `boolean`    | `false`                          | **DANGER**: Never use in production                   |
 
 ## Environment Variables
@@ -383,3 +386,43 @@ Cache lookup order:
 - **Automatic Fallback**: Uses memory cache if KV fails
 
 See [KV documentation](kv-cache.md) for complete setup guide.
+
+## Durable Objects Configuration (NEW in v0.6.0)
+
+### Enable Conversation Persistence
+
+Durable Objects provide stateful conversation management with WebSocket support.
+
+```typescript
+// In a Cloudflare Worker
+export default {
+  async fetch(request, env) {
+    const handler = createCopilotEdgeHandler({
+      apiKey: env.CLOUDFLARE_API_TOKEN,
+      accountId: env.CLOUDFLARE_ACCOUNT_ID,
+      conversationDO: env.CONVERSATION_DO, // DO namespace binding
+      enableConversations: true, // Enable conversation persistence
+      defaultConversationId: 'default-session', // Optional default ID
+    });
+    
+    return handler(request);
+  }
+}
+```
+
+### Conversation Features
+
+With Durable Objects enabled:
+
+1. **Persistent History**: Conversations survive Worker restarts
+2. **WebSocket Support**: Real-time bidirectional communication
+3. **Automatic Context**: Previous messages automatically loaded
+4. **State Management**: User preferences and context persist
+
+### Configuration Options
+
+- `conversationDO`: The Durable Object namespace binding
+- `enableConversations`: Toggle conversation features (default: false)
+- `defaultConversationId`: Default conversation when none specified
+
+See [Durable Objects documentation](durable-objects.md) for complete setup guide.

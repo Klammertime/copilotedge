@@ -1,7 +1,7 @@
 /**
  * CopilotEdge - Production-ready adapter for CopilotKit + Cloudflare Workers AI
  * @author Audrey Klammer (@Klammertime)
- * @version 0.5.0
+ * @version 0.6.0
  * @license MIT
  * 
  * Features:
@@ -167,6 +167,44 @@ export interface CopilotEdgeConfig {
    * @default 'copilotedge:'
    */
   kvCachePrefix?: string;
+  /**
+   * Durable Object namespace for conversation state management.
+   * Enables persistent conversation history and WebSocket support.
+   * @example env.CONVERSATION_DO (bind in wrangler.toml)
+   */
+  conversationDO?: DurableObjectNamespace;
+  /**
+   * Whether to use Durable Objects for conversation management.
+   * When enabled, conversations persist across sessions.
+   * @default false
+   */
+  enableConversations?: boolean;
+  /**
+   * Default conversation ID to use if not provided in requests.
+   * If not set, a new conversation is created for each session.
+   */
+  defaultConversationId?: string;
+}
+
+/**
+ * Cloudflare Durable Object Namespace interface
+ */
+export interface DurableObjectNamespace {
+  newUniqueId(): DurableObjectId;
+  idFromName(name: string): DurableObjectId;
+  idFromString(id: string): DurableObjectId;
+  get(id: DurableObjectId): DurableObjectStub;
+}
+
+export interface DurableObjectId {
+  toString(): string;
+  equals(other: DurableObjectId): boolean;
+}
+
+export interface DurableObjectStub {
+  fetch(request: Request): Promise<Response>;
+  id: DurableObjectId;
+  name?: string;
 }
 
 /**
@@ -378,6 +416,9 @@ export class CopilotEdge {
   private kvNamespace?: KVNamespace;
   private kvCacheTTL: number;
   private kvCachePrefix: string;
+  private conversationDO?: DurableObjectNamespace;
+  private enableConversations: boolean;
+  private defaultConversationId?: string;
 
   /**
    * Creates an instance of CopilotEdge.
@@ -428,6 +469,11 @@ export class CopilotEdge {
     this.kvNamespace = config.kvNamespace;
     this.kvCacheTTL = config.kvCacheTTL || 86400; // 24 hours default
     this.kvCachePrefix = config.kvCachePrefix || 'copilotedge:';
+    
+    // Durable Objects settings
+    this.conversationDO = config.conversationDO;
+    this.enableConversations = config.enableConversations || false;
+    this.defaultConversationId = config.defaultConversationId;
     
     // Validate required fields
     if (!this.apiToken) {
@@ -1002,11 +1048,55 @@ export class CopilotEdge {
    * @returns An OpenAI-compatible chat completion response or streaming response.
    */
   private async handleDirectChat(body: any): Promise<any> {
-    const sanitized = this.getSanitizedMessages(body);
+    let sanitized = this.getSanitizedMessages(body);
 
     if (!sanitized) {
       // This case should be handled by validateRequest, but as a fallback:
       throw new ValidationError('Request body must contain messages.');
+    }
+    
+    // Handle conversation management if enabled
+    if (this.enableConversations && this.conversationDO) {
+      const conversationId = body.conversationId || this.defaultConversationId;
+      
+      if (conversationId) {
+        try {
+          // Get or create conversation Durable Object
+          const doId = this.conversationDO.idFromName(conversationId);
+          const conversationStub = this.conversationDO.get(doId);
+          
+          // Get conversation history
+          const historyResponse = await conversationStub.fetch(
+            new Request('http://do/messages', { method: 'GET' })
+          );
+          
+          if (historyResponse.ok) {
+            const history = await historyResponse.json() as any;
+            
+            // Prepend conversation history to current messages
+            if (history.messages && history.messages.length > 0) {
+              const historyMessages = history.messages.map((msg: any) => ({
+                role: msg.role,
+                content: msg.content
+              }));
+              
+              // Combine history with new messages, avoiding duplicates
+              const currentMessages = (sanitized as any).messages || sanitized;
+              sanitized = {
+                messages: [...historyMessages, ...currentMessages]
+              } as any;
+              
+              if (this.debug) {
+                this.logger.log('[CopilotEdge] Using conversation history:', 
+                  `${history.messages.length} previous messages`);
+              }
+            }
+          }
+        } catch (error) {
+          // Log error but continue without conversation history
+          this.logger.warn('[CopilotEdge] Failed to load conversation history:', error);
+        }
+      }
     }
     
     // Check if streaming is requested (from body or instance config)
@@ -1015,7 +1105,7 @@ export class CopilotEdge {
     if (useStreaming) {
       // Return a streaming response
       const streamingResponse = await this.retryWithBackoff(
-        async () => await this.callCloudflareAIStreaming(sanitized),
+        async () => await this.callCloudflareAIStreaming(sanitized!),
         'Cloudflare AI Streaming'
       );
       
@@ -1032,9 +1122,57 @@ export class CopilotEdge {
     } else {
       // Non-streaming response (existing code)
       const response = await this.retryWithBackoff(
-        async () => await this.callCloudflareAI(sanitized),
+        async () => await this.callCloudflareAI(sanitized!),
         'Cloudflare AI'
       );
+      
+      // Save to conversation if enabled
+      if (this.enableConversations && this.conversationDO) {
+        const conversationId = body.conversationId || this.defaultConversationId;
+        
+        if (conversationId) {
+          try {
+            const doId = this.conversationDO.idFromName(conversationId);
+            const conversationStub = this.conversationDO.get(doId);
+            
+            // Save user message(s) and assistant response
+            const messages = (sanitized as any).messages || sanitized;
+            const lastUserMessage = messages[messages.length - 1];
+            if (lastUserMessage && lastUserMessage.role === 'user') {
+              await conversationStub.fetch(
+                new Request('http://do/messages', {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    role: 'user',
+                    content: lastUserMessage.content,
+                    tokens: JSON.stringify(lastUserMessage).length / 4
+                  }),
+                  headers: { 'Content-Type': 'application/json' }
+                })
+              );
+            }
+            
+            // Save assistant response
+            await conversationStub.fetch(
+              new Request('http://do/messages', {
+                method: 'POST',
+                body: JSON.stringify({
+                  role: 'assistant',
+                  content: response,
+                  tokens: response.length / 4
+                }),
+                headers: { 'Content-Type': 'application/json' }
+              })
+            );
+            
+            if (this.debug) {
+              this.logger.log('[CopilotEdge] Saved to conversation:', conversationId);
+            }
+          } catch (error) {
+            this.logger.warn('[CopilotEdge] Failed to save to conversation:', error);
+          }
+        }
+      }
       
       return {
         id: 'chat-' + Date.now(),
@@ -1654,6 +1792,9 @@ export function createCopilotEdgeHandler(config?: CopilotEdgeConfig) {
   const edge = new CopilotEdge(config);
   return edge.createNextHandler();
 }
+
+// Export Durable Objects
+export { ConversationDO, type ConversationState, type WSMessage } from './durable-objects';
 
 // Default export
 export default CopilotEdge;

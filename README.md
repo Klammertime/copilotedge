@@ -29,7 +29,11 @@ The **first and only** adapter that enables [CopilotKit](https://github.com/Copi
 
 ## Features
 
-- **🗄️ Workers KV Integration** - Persistent global caching across all edge locations **NEW in v0.5.0!**
+- **🎯 Durable Objects Support** - Stateful conversation management **NEW in v0.6.0!**
+  - Persistent conversation history across sessions
+  - WebSocket support for real-time bidirectional communication
+  - Automatic context management and state persistence
+- **🗄️ Workers KV Integration** - Persistent global caching across all edge locations
   - 90-95% reduction in API costs through intelligent caching
   - Cache persists across Worker restarts and deployments
   - Automatic fallback to memory cache if KV unavailable
@@ -199,6 +203,53 @@ const edge = new CopilotEdge({
 
 See [streaming documentation](docs/streaming.md) for complete details.
 
+## 🆕 Durable Objects Support (v0.6.0)
+
+CopilotEdge now supports **Cloudflare Durable Objects** for stateful conversation management with persistent history and WebSocket support!
+
+### Enable Durable Objects
+
+1. **Configure wrangler.toml**:
+```toml
+[[durable_objects.bindings]]
+name = "CONVERSATION_DO"
+class_name = "ConversationDO"
+script_name = "copilotedge-worker"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ConversationDO"]
+```
+
+2. **Use in your Worker**:
+```typescript
+import { createCopilotEdgeHandler, ConversationDO } from 'copilotedge';
+
+export { ConversationDO };
+
+export default {
+  async fetch(request, env) {
+    const handler = createCopilotEdgeHandler({
+      apiKey: env.CLOUDFLARE_API_TOKEN,
+      accountId: env.CLOUDFLARE_ACCOUNT_ID,
+      conversationDO: env.CONVERSATION_DO, // ← Add this
+      enableConversations: true,
+      defaultConversationId: 'user-session',
+    });
+    
+    return handler(request);
+  }
+}
+```
+
+### Benefits
+- **Persistent Conversations** - History survives Worker restarts
+- **WebSocket Support** - Real-time bidirectional communication
+- **Automatic Context** - Seamless conversation continuity
+- **Cost Efficiency** - Reuse conversation context across requests
+
+See [Durable Objects documentation](docs/durable-objects.md) for complete setup guide.
+
 ## 🆕 Workers KV Support (v0.5.0)
 
 CopilotEdge now supports **Cloudflare Workers KV** for persistent global caching that survives restarts and works across all edge locations!
@@ -247,9 +298,11 @@ See [KV documentation](docs/kv-cache.md) for complete setup guide.
 | Topic                                              | Description                                                                                                                      |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | [**Configuration**](docs/configuration.md)         | All options, defaults, and advanced setup                                                                                        |
+| [**Durable Objects**](docs/durable-objects.md)     | ✅ **NEW in v0.6.0!** Stateful conversations with WebSocket support                                                              |
+| [**Workers KV**](docs/kv-cache.md)                 | Persistent global caching setup and configuration                                                                                |
 | [**Supported Models**](docs/models.md)             | Available models, pricing, and updates                                                                                           |
 | [**Error Handling**](docs/errors.md)               | Error types, status codes, and retry strategies                                                                                  |
-| [**Streaming**](docs/streaming.md)                 | ✅ **Full streaming support in v0.4.0!** Real-time SSE responses with ~200ms to first token                                      |
+| [**Streaming**](docs/streaming.md)                 | Real-time SSE responses with ~200ms to first token                                                                               |
 | [**Security**](docs/security.md)                   | Best practices and production config                                                                                             |
 | [**Benchmarks**](docs/benchmarks.md)               | Performance data and methodology                                                                                                 |
 | [**Troubleshooting**](docs/troubleshooting.md)     | Common issues and solutions                                                                                                      |

@@ -87,3 +87,24 @@ export default function Page() {
 ```
 
 That's it! With these three pieces of code, you have a fully functional AI chat assistant powered by Cloudflare's edge network.
+
+## Advanced Examples
+
+### Durable Objects for Stateful Conversations (v0.6.0+)
+
+For applications requiring persistent conversation history and WebSocket support, see our comprehensive Durable Objects example:
+
+- **[durable-objects-example.ts](../examples/durable-objects-example.ts)** - Full implementation with chat UI
+- **[wrangler.toml.example](../examples/wrangler.toml.example)** - Configuration template
+- **[Durable Objects Guide](./durable-objects.md)** - Complete documentation
+
+### OpenAI Open-Source Models
+
+To use OpenAI's powerful open-source models (gpt-oss-120b and gpt-oss-20b):
+
+- **[openai-models.js](../examples/openai-models.js)** - Implementation example with fallback
+
+### More Examples
+
+- **[basic-usage.jsx](../examples/basic-usage.jsx)** - Multiple configuration options including streaming, KV, and DO
+- **[Configuration Guide](./configuration.md)** - All available options explained

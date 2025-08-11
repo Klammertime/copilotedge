@@ -1,0 +1,75 @@
+# Example wrangler.toml for CopilotEdge with Durable Objects
+# Copy this file to wrangler.toml and update with your values
+
+name = "copilotedge-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-11"
+compatibility_flags = ["nodejs_compat"]
+
+# Your Cloudflare account ID
+account_id = "YOUR_ACCOUNT_ID"
+
+# Environment variables (can also use .dev.vars file)
+[vars]
+# Add your Cloudflare API credentials here or use .dev.vars
+# CLOUDFLARE_API_TOKEN = "your-api-token"
+# CLOUDFLARE_ACCOUNT_ID = "your-account-id"
+
+# Durable Objects binding for conversation management
+[[durable_objects.bindings]]
+name = "CONVERSATION_DO"
+class_name = "ConversationDO"
+script_name = "copilotedge-worker"
+
+# Migration for Durable Objects
+[[migrations]]
+tag = "v1"
+new_classes = ["ConversationDO"]
+
+# Optional: Workers KV for additional caching
+[[kv_namespaces]]
+binding = "COPILOT_CACHE"
+id = "YOUR_KV_NAMESPACE_ID"
+# For local development
+preview_id = "YOUR_PREVIEW_KV_NAMESPACE_ID"
+
+# Optional: Custom domain
+# [[routes]]
+# pattern = "chat.example.com/*"
+# zone_id = "YOUR_ZONE_ID"
+
+# Optional: Enable logpush for production monitoring
+# [logpush]
+# enabled = true
+
+# Observability settings
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# Build configuration
+[build]
+command = "npm run build"
+watch_paths = ["src/**/*.ts"]
+
+# Development settings
+[dev]
+port = 8787
+local_protocol = "http"
+
+# Optional: Tail consumers for log processing
+# [[tail_consumers]]
+# service = "log-processor"
+# environment = "production"
+
+# Optional: Analytics Engine for metrics
+# [[analytics_engine_datasets]]
+# binding = "METRICS"
+# dataset = "copilotedge_metrics"
+
+# Optional: Rate limiting rules
+# [[unsafe.bindings]]
+# name = "RATE_LIMITER"
+# type = "ratelimit"
+# namespace_id = "1"
+# simple = { limit = 60, period = 60 }

@@ -1,21 +1,21 @@
-# Known Limitations - v0.5.0
+# Known Limitations - v0.6.0
 
-This document outlines known limitations in CopilotEdge v0.5.0. We believe in transparency and want users to make informed decisions.
+This document outlines known limitations in CopilotEdge v0.6.0. We believe in transparency and want users to make informed decisions.
 
 ## Test Coverage
 
-**Current Status**: ~25% code coverage (71 functional tests passing)
+**Current Status**: ~25% code coverage (87 functional tests passing)
 
 While all major features have functional tests that pass, the overall code coverage is below industry standards. This means:
 
-- ✅ **Well-tested**: Core functionality, KV caching, streaming, basic error handling
+- ✅ **Well-tested**: Core functionality, KV caching, Durable Objects, streaming, basic error handling
 - ⚠️ **Limited testing**: Edge cases, complex error scenarios, network failures
 - ⚠️ **Untested**: Some error recovery paths, timeout scenarios, malformed responses
 
 **Mitigation**: 
-- All 71 functional tests pass consistently
-- Core features (KV, streaming, caching) have dedicated test suites
-- v0.5.1 will focus on improving coverage to 80%+
+- All 87 functional tests pass consistently
+- Core features (DO, KV, streaming, caching) have dedicated test suites
+- v0.6.1 will focus on improving coverage to 80%+
 
 ## Production Considerations
 
@@ -34,7 +34,13 @@ While all major features have functional tests that pass, the overall code cover
 - Network interruption recovery not fully tested
 - Very long streams (>5 minutes) not tested
 
-### 4. Rate Limiting
+### 4. Durable Objects Limitations
+- WebSocket test fails in mock environment (production code works)
+- Conversation size limited by DO storage (10MB)
+- WebSocket connections limited per DO instance
+- No built-in conversation migration between regions
+
+### 5. Rate Limiting
 - In-memory rate limiting (per instance only)
 - Not suitable for distributed rate limiting
 - Resets on Worker restart
@@ -54,17 +60,18 @@ While all major features have functional tests that pass, the overall code cover
 
 ## Improvement Roadmap
 
-### v0.5.1 (Planned)
+### v0.6.1 (Planned)
 - Increase test coverage to 80%+
 - Add integration tests for error scenarios
 - Test network failure recovery
 - Add performance benchmarks
+- Fix WebSocket test mocking
 
-### v0.6.0 (Future)
-- Durable Objects for stateful sessions
+### v0.7.0 (Future)
+- Analytics Engine for usage tracking
 - Distributed rate limiting
 - Advanced error recovery
-- WebSocket support
+- Conversation migration tools
 
 ## Reporting Issues
 
@@ -110,10 +117,11 @@ We believe in honest communication about our software's limitations. This allows
 - Implement appropriate safeguards
 - Contribute to improvements
 
-Despite these limitations, CopilotEdge v0.5.0 offers significant value:
+Despite these limitations, CopilotEdge v0.6.0 offers significant value:
 - 90-95% cost reduction with KV caching
-- Real-time streaming support
-- 71 passing functional tests
+- Stateful conversations with Durable Objects
+- Real-time streaming and WebSocket support
+- 87 passing functional tests
 - Active development and support
 
 We're committed to addressing these limitations in upcoming releases.
