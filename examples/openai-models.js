@@ -1,88 +1,117 @@
 /**
- * Example showing how to use OpenAI models on Cloudflare with fallback support
+ * Example demonstrating how to use OpenAI's open-source models on 
+ * Cloudflare Workers AI with CopilotEdge.
  * 
- * This example demonstrates using OpenAI's open models on Cloudflare Workers AI
- * with automatic fallback to Llama models if needed.
+ * This example shows a Next.js API route that uses the powerful `gpt-oss-120b` model
+ * and automatically falls back to the more lightweight `gpt-oss-20b` model
+ * if the primary model is unavailable.
  */
 
-import { CopilotEdge } from 'copilotedge';
+import { createCopilotEdgeHandler, CopilotEdge } from 'copilotedge';
 
-// Example 1: Basic OpenAI model configuration
-const handler1 = new CopilotEdge({
-  apiKey: process.env.CLOUDFLARE_API_TOKEN,
-  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-  model: '@cf/openai/gpt-oss-120b',  // OpenAI's 120B model
-  debug: true
-});
+/**
+ * Creates a Next.js API route handler for serving OpenAI models via Cloudflare.
+ * 
+ * It automatically reads `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
+ * from environment variables.
+ * 
+ * @returns {function} A Next.js API route handler.
+ */
+export function createOpenAIHandler() {
+  return createCopilotEdgeHandler({
+    // Use OpenAI's powerful 120B parameter open-source model.
+    // This model provides near GPT-4 level performance and is licensed under Apache 2.0.
+    model: '@cf/openai/gpt-oss-120b',
+    
+    // If the primary model fails (e.g., due to capacity issues or other errors),
+    // automatically fall back to the smaller 20B parameter model.
+    // Both models are licensed under Apache 2.0.
+    fallback: '@cf/openai/gpt-oss-20b',
+    
+    // Enable debug logging to see detailed information about requests,
+    // cache hits, and fallbacks in your server logs.
+    debug: true
+  });
+}
 
-// Example 2: With fallback to a different model
-const handler2 = new CopilotEdge({
-  apiKey: process.env.CLOUDFLARE_API_TOKEN,
-  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-  model: '@cf/openai/gpt-oss-120b',           // Try OpenAI's 120B model first
-  fallback: '@cf/meta/llama-3.1-70b',    // Fall back to Llama if needed
-  debug: true
-});
+/**
+ * An example of how to use this handler in a Next.js API route.
+ * 
+ * To use this, create a file at `app/api/openai/route.js` and add:
+ * 
+ * ```javascript
+ * import { createOpenAIHandler } from './path/to/this/file';
+ * 
+ * export const POST = createOpenAIHandler();
+ * ```
+ */
 
-// Example 3: Using the provider config
-const handler3 = new CopilotEdge({
-  apiKey: process.env.CLOUDFLARE_API_TOKEN,
-  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-  provider: 'cloudflare',
-  model: '@cf/openai/gpt-oss-120b',           // Primary model
-  fallback: '@cf/meta/llama-3.1-8b-instruct',  // More reliable fallback
-  debug: true
-});
+// ============================================
+//          Testing the Handler
+// ============================================
 
-// Usage example
-async function testOpenAIModels() {
-  console.log('Testing OpenAI models with automatic fallback...');
+/**
+ * A standalone function to test the OpenAI model handler logic.
+ * This can be run in a Node.js environment to verify your setup.
+ */
+async function testOpenAIIntegration() {
+  console.log('🧪 Testing OpenAI model with fallback...');
   
+  let edge = null;
   try {
-    // Initialize with OpenAI model and fallback
-    const edge = new CopilotEdge({
-      apiKey: process.env.CLOUDFLARE_API_TOKEN,
-      accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+    edge = new CopilotEdge({
       model: '@cf/openai/gpt-oss-120b',
-      fallback: '@cf/meta/llama-3.1-8b-instruct',
+      fallback: '@cf/openai/gpt-oss-20b',
       debug: true
+      // Credentials are read from process.env by default
     });
     
-    // Optionally test features to check configuration
+    // Check the configuration and feature status
     await edge.testFeatures();
     
-    // Make a request
+    console.log('\nSubmitting request to the model...');
+    
+    // Ensure we have a valid message with required fields
+    // An empty messages array or missing role/content will throw ValidationError
     const result = await edge.handleRequest({
       messages: [
         { 
           role: 'user', 
-          content: 'Explain quantum computing in simple terms' 
+          content: 'Explain the significance of the Apache 2.0 license for open-source AI models.' 
         }
       ]
     });
     
-    console.log('Response from model:', result.choices[0].message.content);
+    console.log('\n✅ Response from AI:');
+    console.log(result.choices[0].message.content);
     
-    // Get metrics to see if fallback was used
     const metrics = edge.getMetrics();
-    console.log('Performance Metrics:', metrics);
+    console.log('\n📊 Performance Metrics:');
+    console.log(metrics);
     
     if (metrics.fallbackUsed > 0) {
-      console.log('Note: Fallback model was used');
+      console.log('\n⚠️ Fallback model was used for this request.');
+    } else {
+      console.log('\n✅ Primary model was used successfully.');
     }
+    
   } catch (error) {
-    console.error('Error:', error.message);
+    console.error('❌ Error during testing:', error.message);
+    
+    // Provide more specific error handling guidance
+    if (error.name === 'ValidationError') {
+      console.error('Validation failed: Check that your messages array is not empty and contains valid messages');
+    } else if (error.name === 'APIError') {
+      console.error(`API error ${error.statusCode}: This might be a temporary issue with the model or service`);
+    }
+  } finally {
+    // Always clean up resources, even if there was an error
+    if (edge) {
+      edge.destroy();
+      console.log('\n🧹 Resources cleaned up');
+    }
   }
 }
 
-// For Next.js API routes
-export const createOpenAIHandler = () => {
-  const edge = new CopilotEdge({
-    apiKey: process.env.CLOUDFLARE_API_TOKEN,
-    accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-    model: '@cf/openai/gpt-oss-120b',
-    fallback: '@cf/meta/llama-3.1-8b-instruct'
-  });
-  
-  return edge.createNextHandler();
-};
+// To run this test, you would execute the following in a script:
+// testOpenAIIntegration();

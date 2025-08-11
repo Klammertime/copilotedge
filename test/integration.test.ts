@@ -5,7 +5,9 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Miniflare } from 'miniflare';
-import CopilotEdge, { ValidationError, APIError } from '../src/index';
+import CopilotEdge, { createCopilotEdgeHandler, ValidationError, APIError } from '../src/index';
+import { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 
 describe('CopilotEdge Integration Tests', () => {
   let mf: Miniflare;
@@ -362,5 +364,23 @@ describe('CopilotEdge Next.js Handler', () => {
     });
 
     expect(handler).toBeInstanceOf(Function);
+
+    // Create a mock NextRequest
+    const mockRequest = new NextRequest('http://localhost/api/copilotedge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: 'Integration test' }]
+      })
+    });
+
+    // Execute the handler
+    const response = await handler(mockRequest);
+    
+    // Assert the response is a valid NextResponse
+    expect(response).toBeInstanceOf(NextResponse);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.choices[0].message.content).toBe('Test response from mock AI');
   });
 });

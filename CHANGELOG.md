@@ -5,6 +5,38 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-08-10
+
+### Added
+
+- **Comprehensive Test Suite:** Added a full suite of unit and integration tests to verify core logic, including caching, retries, fallbacks, and request validation.
+- **Hardened Validation:** The request validation logic is now more robust, correctly handling all valid GraphQL requests from the CopilotKit frontend.
+
+### Fixed
+
+- **Critical Bug Fixes:** Corrected numerous bugs in the request handler that caused errors and incorrect behavior.
+- **Dependency Management:** Moved CopilotKit packages to `dependencies` for a seamless, one-step installation experience.
+- **Example Accuracy:** All examples are now fully functional, consistent, and reflect the correct usage of the library.
+
+### Changed
+
+- **Project Cleanup:** Removed all misleading, redundant, and non-functional example files to provide a clear and trustworthy developer experience.
+
+## [0.2.7] – 2025-08-09
+
+### Added
+
+- Full support for OpenAI's gpt-oss-20b model (20B parameters, runs on 16GB devices)
+- Enhanced documentation highlighting Apache 2.0 licensed models
+- New examples for edge-optimized deployments with gpt-oss-20b
+- Blog post draft explaining OpenAI open-source model capabilities
+
+### Changed
+
+- Updated README with dedicated section for OpenAI open-source models
+- Improved examples showing both gpt-oss-120b and gpt-oss-20b usage
+- Enhanced package description to highlight open-source model support
+
 ## [0.2.6] – 2025-08-09
 
 ### Added

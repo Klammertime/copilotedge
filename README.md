@@ -25,17 +25,17 @@ The **first and only** adapter that enables [CopilotKit](https://github.com/Copi
 - 💰 Reduce AI costs by up to 90% with built-in caching
 - ⚡ Achieve sub-second response times with edge computing
 - 🔒 Keep sensitive data within Cloudflare's secure infrastructure
-- 🎯 Access OpenAI's massive 120B parameter models via Cloudflare
+- 🎯 Access OpenAI's open-source gpt-oss models (120B & 20B) via Cloudflare
 
 ## Features
 
 - **🌍 Edge Computing** - Automatic region selection across 100+ locations for lowest latency
-- **💾 Smart Caching** - 60s default TTL reduces costs by up to 90% for repeated queries
+- **💾 Smart Caching** - 60s default TTL reduces costs for repeated queries
 - **🔄 Enterprise Resilience** - Built-in retry logic with exponential backoff and jitter
-- **🛡️ Rate Limiting** - Configurable limits to prevent abuse and control costs
+- **🛡️ Rate Limiting** - In-memory rate limiting to prevent abuse (configurable, works per-instance)
 - **📘 Type Safe** - Full TypeScript support with comprehensive types and IntelliSense
-- **🪶 Zero Dependencies** - Lightweight ~38KB total, no bloat
-- **🧠 OpenAI Models** - Access OpenAI's massive 120B and 20B parameter models via Cloudflare
+- **🪶 Lightweight** - Zero runtime dependencies, ~38KB total size
+- **🧠 OpenAI Open Models** - Support for gpt-oss-120b (80GB GPU) and gpt-oss-20b (16GB edge devices)
 - **🎯 Model Fallbacks** - Automatic failover to alternative models for high availability
 
 ## What Makes This Special?
@@ -46,12 +46,36 @@ This is **the only package** that connects CopilotKit to Cloudflare Workers AI. 
 - Higher latency from centralized API endpoints
 - Privacy concerns with data leaving your infrastructure
 
-With CopilotEdge, you get:
+With CopilotEdge, you can get:
 
 - Cloudflare's competitive pricing (as low as $0.01 per million tokens for some models)
 - Edge inference in the closest data center to your users
 - Data processing within Cloudflare's secure network
-- Access to 100+ models including Llama, Mistral, and OpenAI models
+- Access to 100+ models including Llama, Mistral, and OpenAI's open-source models
+
+## OpenAI Open-Source Models (New!)
+
+CopilotEdge supports OpenAI's latest open-source models released under Apache 2.0 license:
+
+- **gpt-oss-120b**: Near-parity with OpenAI o4-mini, runs on 80GB GPUs
+- **gpt-oss-20b**: Similar to OpenAI o3-mini, runs on 16GB edge devices
+
+These models feature:
+
+- ✅ Strong tool use and function calling capabilities
+- ✅ Chain-of-thought (CoT) reasoning
+- ✅ Structured outputs support
+- ✅ Compatible with Responses API for agentic workflows
+- ✅ Python code execution support (via Cloudflare Containers)
+
+## Compatibility
+
+- ✅ **React 18.x** - Fully supported
+- ✅ **React 19.x** - Fully supported
+- ✅ **Next.js 13+** - App Router & Pages Router
+- ✅ **Next.js 14+** - Full support
+- ✅ **Next.js 15+** - Full support
+- ✅ **CopilotKit** - All versions
 
 ## Quick Start
 
@@ -62,6 +86,8 @@ With CopilotEdge, you get:
 ```bash
 npm install copilotedge
 ```
+
+This will automatically install the necessary CopilotKit packages (`@copilotkit/react-core` and `@copilotkit/react-ui`) for you.
 
 ### 2. Set Up Environment Variables
 
@@ -83,16 +109,14 @@ import { createCopilotEdgeHandler } from "copilotedge";
 
 // Basic setup
 export const POST = createCopilotEdgeHandler({
-  apiKey: process.env.CLOUDFLARE_API_TOKEN,
-  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+  // apiKey and accountId are read from environment variables
+  // CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
 });
 
-// With OpenAI model and fallback
+// With OpenAI open-source model and fallback
 // export const POST = createCopilotEdgeHandler({
-//   apiKey: process.env.CLOUDFLARE_API_TOKEN,
-//   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-//   model: '@cf/openai/gpt-oss-120b',           // OpenAI's 120B parameter model
-//   fallback: '@cf/meta/llama-3.1-8b-instruct'  // Fallback model
+//   model: '@cf/openai/gpt-oss-120b',           // OpenAI's open 120B model (Apache 2.0)
+//   fallback: '@cf/openai/gpt-oss-20b'          // Lighter 20B model as fallback
 // });
 ```
 
@@ -101,9 +125,23 @@ export const POST = createCopilotEdgeHandler({
 ```tsx
 // app/layout.tsx
 import { CopilotKit } from "@copilotkit/react-core";
+import { CopilotPopup } from "@copilotkit/react-ui";
+import "@copilotkit/react-ui/styles.css"; // Import the default styles
 
 export default function Layout({ children }) {
-  return <CopilotKit runtimeUrl="/api/copilotedge">{children}</CopilotKit>;
+  return (
+    <CopilotKit runtimeUrl="/api/copilotedge">
+      {children}
+      <CopilotPopup
+        instructions="You are a helpful AI assistant."
+        defaultOpen={true}
+        labels={{
+          title: "CopilotEdge Assistant",
+          initial: "Hello! How can I help you?",
+        }}
+      />
+    </CopilotKit>
+  );
 }
 ```
 
@@ -137,8 +175,8 @@ Creates a Next.js API route handler.
 
 ```typescript
 const handler = createCopilotEdgeHandler({
-  apiKey: string, // Required
-  accountId: string, // Required
+  apiKey: string, // Required (or CLOUDFLARE_API_TOKEN env var)
+  accountId: string, // Required (or CLOUDFLARE_ACCOUNT_ID env var)
   model: string, // Default: '@cf/meta/llama-3.1-8b-instruct'
   provider: string, // Default: 'cloudflare'
   fallback: string, // Optional fallback model
@@ -179,6 +217,18 @@ Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 ## License
 
 MIT © [Audrey Klammer](https://github.com/Klammertime)
+
+## Troubleshooting
+
+### Deprecated Dependency Warnings
+
+If you see warnings about deprecated packages:
+
+```
+WARN deprecated glob@7.2.3, inflight@1.0.6, etc.
+```
+
+**Solution:** These are transitive dependencies from upstream packages. They don't affect functionality and will be resolved as the ecosystem updates.
 
 ## Support
 

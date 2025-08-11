@@ -1,7 +1,7 @@
 /**
  * CopilotEdge - Production-ready adapter for CopilotKit + Cloudflare Workers AI
  * @author Audrey Klammer (@Klammertime)
- * @version 0.2.6
+ * @version 0.3.0
  * @license MIT
  * 
  * Features:
@@ -479,6 +479,11 @@ export class CopilotEdge {
       return this.fastestRegion;
     }
 
+    // Clear old entries to prevent memory leak (keep max 100 entries)
+    if (this.regionLatencies.size > 100) {
+      this.regionLatencies.clear();
+    }
+
     if (this.debug) {
       this.logger.log('[CopilotEdge] Testing edge regions for optimal performance...');
     }
@@ -600,11 +605,10 @@ export class CopilotEdge {
       throw new ValidationError(`Request object depth exceeds maximum nesting depth (${this.maxObjectDepth})`);
     }
     
-    // Check for GraphQL mutation
-    if (body.operationName === 'generateCopilotResponse') {
-      if (!body.variables?.data) {
-        throw new ValidationError('Missing variables.data in GraphQL mutation');
-      }
+    // Allow any standard GraphQL operation to pass initial validation.
+    // This includes the introspection query and any other operations
+    // the CopilotKit frontend might send.
+    if (body.operationName) {
       return;
     }
     
@@ -667,6 +671,23 @@ export class CopilotEdge {
       }
     }
     return maxDepth;
+  }
+
+  /**
+   * Create a minimal, valid response for a GraphQL introspection query.
+   * This is necessary to satisfy CopilotKit's initial "handshake" request.
+   * @returns A basic GraphQL response structure.
+   */
+  private createIntrospectionResponse(): any {
+    return {
+      data: {
+        __schema: {
+          queryType: { name: 'Query' },
+          mutationType: { name: 'Mutation' },
+          types: [],
+        },
+      },
+    };
   }
 
   /**
@@ -750,6 +771,14 @@ export class CopilotEdge {
     this.metrics.totalRequests++;
     
     try {
+      // Allow GraphQL introspection queries to pass through validation
+      if (body.operationName === 'IntrospectionQuery') {
+        if (this.debug) {
+          this.logger.log('[CopilotEdge] Received GraphQL IntrospectionQuery, returning minimal schema.');
+        }
+        return this.createIntrospectionResponse();
+      }
+
       // Validate request
       this.validateRequest(body);
       
@@ -1095,7 +1124,11 @@ export class CopilotEdge {
         return NextResponse.json(result, {
           headers: {
             'X-Powered-By': 'CopilotEdge',
-            'X-Cache': result.cached ? 'HIT' : 'MISS'
+            'X-Cache': result.cached ? 'HIT' : 'MISS',
+            'X-Content-Type-Options': 'nosniff',
+            'X-Frame-Options': 'DENY',
+            'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+            'Referrer-Policy': 'strict-origin-when-cross-origin'
             // Removed X-Contained-Sensitive header for security
           }
         });
