@@ -48,3 +48,10 @@ temp/
 # Dev notes
 New_Research.md
 cloudflare-copilotkit-known-issues.md
+
+# Competitive strategy (CONFIDENTIAL)
+competitive-edge.md
+COMPETITIVE-*.md
+*-CONFIDENTIAL.md
+strategy/
+.private/RELEASE_CHECKLIST.md

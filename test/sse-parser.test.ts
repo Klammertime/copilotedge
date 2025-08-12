@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // Direct test of SSEParser class which is currently uncovered
 describe('SSE Parser Tests', () => {

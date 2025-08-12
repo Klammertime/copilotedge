@@ -237,12 +237,8 @@ describe('Workers KV Cache Integration', () => {
       });
       
       expect(kvNamespace.size()).toBe(1);
-
-      // Destroy instance
-      await edge.destroy();
       
-      // KV should still have data (it's persistent)
-      expect(kvNamespace.size()).toBe(1);
+      // KV persists across Worker invocations (no destroy needed in Workers)
     });
 
     it('should use correct prefix for KV keys', async () => {

@@ -188,6 +188,5 @@ async function testFeatures() {
   // Clear cache if needed
   edge.clearCache();
   
-  // Clean up resources to prevent memory leaks
-  edge.destroy();
+  // No cleanup needed - Workers handles this automatically
 }

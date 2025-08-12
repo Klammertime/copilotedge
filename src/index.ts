@@ -1,7 +1,7 @@
 /**
  * CopilotEdge - Production-ready adapter for CopilotKit + Cloudflare Workers AI
  * @author Audrey Klammer (@Klammertime)
- * @version 0.6.0
+ * @version 0.7.0
  * @license MIT
  * 
  * Features:
@@ -15,33 +15,17 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { TelemetryConfig, TelemetryManager, SpanNames } from './telemetry';
+import { SpanKind } from '@opentelemetry/api';
 
 /**
- * Logger interface for abstracting console logging
+ * Simple logging functions - no classes needed in Workers
  */
-interface Logger {
-  log: (...args: any[]) => void;
-  warn: (...args: any[]) => void;
-  error: (...args: any[]) => void;
-}
-
-/**
- * Production logger - suppresses debug logs
- */
-class ProductionLogger implements Logger {
-  log() {} // No-op in production
-  warn(...args: any[]) { console.warn(...args); }
-  error(...args: any[]) { console.error(...args); }
-}
-
-/**
- * Debug logger - outputs all logs
- */
-class DebugLogger implements Logger {
-  log(...args: any[]) { console.log(...args); }
-  warn(...args: any[]) { console.warn(...args); }
-  error(...args: any[]) { console.error(...args); }
-}
+const createLogger = (debug: boolean) => ({
+  log: debug ? (...args: any[]) => console.log(...args) : () => {},
+  warn: (...args: any[]) => console.warn(...args),
+  error: (...args: any[]) => console.error(...args)
+});
 
 /**
  * Configuration options for CopilotEdge
@@ -94,11 +78,6 @@ export interface CopilotEdgeConfig {
    */
   regionCheckTimeout?: number;
   /**
-   * Maximum size of the LRU cache.
-   * @default 100
-   */
-  cacheSize?: number;
-  /**
    * Timeout for API calls to Cloudflare AI in milliseconds.
    * @default 30000
    */
@@ -139,6 +118,10 @@ export interface CopilotEdgeConfig {
    * @default 10
    */
   maxObjectDepth?: number;
+  /**
+   * OpenTelemetry configuration for distributed tracing and metrics
+   */
+  telemetry?: TelemetryConfig;
   /**
    * Enable streaming responses from Cloudflare AI.
    * When enabled, responses will be streamed as they are generated.
@@ -318,7 +301,6 @@ const DEFAULTS = {
   CACHE_TIMEOUT: 60000, // 60 seconds
   MAX_RETRIES: 3,
   RATE_LIMIT: 60, // per minute
-  CACHE_SIZE: 100,
   MESSAGE_LENGTH_LIMIT: 4000,
   API_TIMEOUT: 30000, // 30 seconds
   MAX_BACKOFF: 8000, // 8 seconds
@@ -330,54 +312,6 @@ const DEFAULTS = {
 };
 
 /**
- * A simple circuit breaker implementation to prevent cascading failures.
- */
-class CircuitBreaker {
-  private failures = 0;
-  private lastFailureTime = 0;
-  private state: 'closed' | 'open' | 'half-open' = 'closed';
-  public failureThreshold: number;
-  public openStateTimeout: number;
-
-  constructor(threshold = DEFAULTS.CIRCUIT_BREAKER_FAILURE_THRESHOLD, timeout = DEFAULTS.CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT) {
-    this.failureThreshold = threshold;
-    this.openStateTimeout = timeout;
-  }
-
-  async execute<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.state === 'open') {
-      if (Date.now() - this.lastFailureTime > this.openStateTimeout) {
-        this.state = 'half-open';
-      } else {
-        throw new Error('Circuit breaker is open');
-      }
-    }
-
-    try {
-      const result = await fn();
-      this.reset();
-      return result;
-    } catch (error) {
-      this.recordFailure();
-      throw error;
-    }
-  }
-
-  private recordFailure() {
-    this.failures++;
-    this.lastFailureTime = Date.now();
-    if (this.failures >= this.failureThreshold) {
-      this.state = 'open';
-    }
-  }
-
-  private reset() {
-    this.failures = 0;
-    this.state = 'closed';
-  }
-}
-
-/**
  * Main CopilotEdge class for handling AI requests.
  */
 export class CopilotEdge {
@@ -387,16 +321,13 @@ export class CopilotEdge {
   private fallbackModel: string | null;
   private provider: string;
   private debug: boolean;
-  private logger: Logger;
+  private logger: ReturnType<typeof createLogger>;
   private cache: Map<string, { data: any; timestamp: number }>;
-  private cacheLocks: Map<string, Promise<any>>;
   private cacheTimeout: number;
-  private cacheSize: number;
   private apiTimeout: number;
   private maxRetries: number;
   private requestCount: Map<string, number>;
   private rateLimit: number;
-  private circuitBreaker: CircuitBreaker;
   private fetch: (url: string, init?: RequestInit) => Promise<Response>;
   private metrics: {
     totalRequests: number;
@@ -419,6 +350,7 @@ export class CopilotEdge {
   private conversationDO?: DurableObjectNamespace;
   private enableConversations: boolean;
   private defaultConversationId?: string;
+  private telemetry: TelemetryManager | null = null;
 
   /**
    * Creates an instance of CopilotEdge.
@@ -426,8 +358,10 @@ export class CopilotEdge {
    */
   constructor(config: CopilotEdgeConfig = {}) {
     // Validate and set configuration
-    this.apiToken = config.apiKey || process.env.CLOUDFLARE_API_TOKEN || '';
-    this.accountId = config.accountId || process.env.CLOUDFLARE_ACCOUNT_ID || '';
+    // In Workers, use wrangler.toml bindings or pass config directly
+    // In Node.js environments (like tests), fall back to process.env
+    this.apiToken = config.apiKey || (typeof process !== 'undefined' ? process.env?.CLOUDFLARE_API_TOKEN : '') || '';
+    this.accountId = config.accountId || (typeof process !== 'undefined' ? process.env?.CLOUDFLARE_ACCOUNT_ID : '') || '';
     this.provider = config.provider || DEFAULTS.PROVIDER;
     
     // Handle model configuration with provider and fallback support
@@ -445,13 +379,13 @@ export class CopilotEdge {
     // Set fallback model if provided
     this.fallbackModel = config.fallback || null;
     
-    this.debug = config.debug || process.env.NODE_ENV === 'development';
-    this.logger = this.debug ? new DebugLogger() : new ProductionLogger();
+    // Workers is always production, debug must be explicitly enabled
+    this.debug = config.debug || false;
+    this.logger = createLogger(this.debug);
     this.cacheTimeout = config.cacheTimeout || DEFAULTS.CACHE_TIMEOUT;
     this.maxRetries = config.maxRetries || DEFAULTS.MAX_RETRIES;
     this.rateLimit = config.rateLimit || DEFAULTS.RATE_LIMIT;
     this.enableInternalSensitiveLogging = config.enableInternalSensitiveLogging || false;
-    this.cacheSize = config.cacheSize || DEFAULTS.CACHE_SIZE;
     this.apiTimeout = config.apiTimeout || DEFAULTS.API_TIMEOUT;
     this.fetch = config.fetch || global.fetch;
     
@@ -485,13 +419,8 @@ export class CopilotEdge {
     
     // Initialize cache
     this.cache = new Map();
-    this.cacheLocks = new Map();
     
     this.requestCount = new Map();
-    this.circuitBreaker = new CircuitBreaker(
-      config.circuitBreakerFailureThreshold || DEFAULTS.CIRCUIT_BREAKER_FAILURE_THRESHOLD,
-      config.circuitBreakerOpenStateTimeout || DEFAULTS.CIRCUIT_BREAKER_OPEN_STATE_TIMEOUT
-    );
     
     // Metrics tracking
     this.metrics = {
@@ -502,9 +431,33 @@ export class CopilotEdge {
       fallbackUsed: 0
     };
     
+    // Initialize telemetry if configured
+    if (config.telemetry?.enabled) {
+      // Hash model name for security - don't expose infrastructure details
+      // Use a simple hash that works synchronously in both Node.js and Workers
+      const modelHash = this.simpleHash(this.model).slice(0, 8);
+      
+      const modelProvider = this.model.startsWith('@cf/meta/') ? 'meta' :
+                           this.model.startsWith('@cf/mistral/') ? 'mistral' :
+                           this.model.startsWith('@cf/google/') ? 'google' :
+                           this.model.startsWith('@cf/openai/') ? 'openai' :
+                           'other';
+      
+      this.telemetry = new TelemetryManager({
+        ...config.telemetry,
+        serviceVersion: '0.7.0',
+        attributes: {
+          'copilotedge.model_hash': modelHash, // Hashed model identifier
+          'copilotedge.model_provider': modelProvider, // Generic provider category
+          'copilotedge.provider': this.provider,
+          ...config.telemetry.attributes
+        }
+      });
+    }
+    
     if (this.debug) {
-      // For production safety, create a separate log object that limits sensitive info
-      const isProduction = process.env.NODE_ENV === 'production';
+      // Workers is always production-like environment
+      const isProduction = true;
       const logConfig = {
         // In production, only log generic model info, not specific models
         model: isProduction ? (this.model.includes('/') ? 'custom-model' : this.model) : this.model,
@@ -543,6 +496,23 @@ export class CopilotEdge {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     return hashHex; // Full SHA-256 hash to prevent collisions
+  }
+
+  /**
+   * Simple synchronous hash function for telemetry.
+   * Uses a fast non-cryptographic hash suitable for obfuscation.
+   * @param str - The string to hash.
+   * @returns A hex string hash.
+   */
+  private simpleHash(str: string): string {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    // Convert to positive hex string
+    return Math.abs(hash).toString(16).padStart(8, '0');
   }
 
   /**
@@ -599,14 +569,6 @@ export class CopilotEdge {
       data,
       timestamp: Date.now()
     });
-    
-    // LRU eviction when cache gets too large
-    if (this.cache.size > this.cacheSize) {
-      const firstKey = this.cache.keys().next().value;
-      if (firstKey) {
-        this.cache.delete(firstKey);
-      }
-    }
     
     // Save to KV if available (persistent across all edge locations)
     if (this.kvNamespace) {
@@ -683,41 +645,32 @@ export class CopilotEdge {
     fn: () => Promise<T>, 
     context: string = 'request'
   ): Promise<T> {
-    return this.circuitBreaker.execute(async () => {
-      let lastError: any;
-      
-      for (let attempt = 0; attempt < this.maxRetries; attempt++) {
-        try {
-          return await fn();
-        } catch (error: any) {
-          lastError = error;
-          
-          // Don't retry on validation errors
-          if (error instanceof ValidationError) {
-            throw error;
+    let lastError: any;
+    
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error: any) {
+        lastError = error;
+        
+        // Don't retry on validation errors or client errors (except 429)
+        if (error instanceof ValidationError || 
+            (error instanceof APIError && error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 429)) {
+          throw error;
+        }
+        
+        if (attempt < this.maxRetries - 1) {
+          const delay = Math.min(Math.pow(2, attempt) * 1000, 8000);
+          if (this.debug) {
+            this.logger.log(`[CopilotEdge] Retry ${attempt + 1}/${this.maxRetries} for ${context} after ${delay}ms...`);
           }
-          
-          // Don't retry on 4xx errors (except 429)
-          if (error instanceof APIError && error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 429) {
-            throw error;
-          }
-          
-          if (attempt < this.maxRetries - 1) {
-            const delay = Math.min(Math.pow(2, attempt) * 1000, DEFAULTS.MAX_BACKOFF); // Max 8s
-            const jitter = Math.random() * DEFAULTS.JITTER; // Add jitter
-            
-            if (this.debug) {
-              this.logger.log(`[CopilotEdge] Retry ${attempt + 1}/${this.maxRetries} for ${context} after ${Math.round(delay + jitter)}ms...`);
-            }
-            
-            await new Promise(resolve => setTimeout(resolve, delay + jitter));
-          }
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
-      
-      this.metrics.errors++;
-      throw lastError;
-    });
+    }
+    
+    this.metrics.errors++;
+    throw lastError;
   }
 
   /**
@@ -907,9 +860,41 @@ export class CopilotEdge {
     const start = performance.now();
     this.metrics.totalRequests++;
     
+    // Wrap entire request in telemetry span if enabled
+    if (this.telemetry) {
+      return this.telemetry.withSpan(
+        SpanNames.REQUEST,
+        async () => {
+          try {
+            return await this.handleRequestInternal(body, start);
+          } catch (error) {
+            // Telemetry will record the error
+            throw error;
+          }
+        },
+        {
+          kind: SpanKind.SERVER,
+          attributes: {
+            'request.size': JSON.stringify(body).length,
+            'request.type': body.operationName ? 'graphql' : 'chat'
+          }
+        }
+      );
+    } else {
+      return this.handleRequestInternal(body, start);
+    }
+  }
+  
+  private async handleRequestInternal(body: any, start: number): Promise<any> {
     try {
       // Validate request FIRST to catch null/invalid types.
-      this.validateRequest(body);
+      if (this.telemetry) {
+        await this.telemetry.withSpan(SpanNames.VALIDATION, async () => {
+          this.validateRequest(body);
+        });
+      } else {
+        this.validateRequest(body);
+      }
       
       // Allow GraphQL introspection queries to pass through without caching, etc.
       if (body.operationName === 'IntrospectionQuery') {
@@ -924,14 +909,6 @@ export class CopilotEdge {
       
       const cacheKey = await this.hashRequest(body);
 
-      // Check for an existing lock
-      if (this.cacheLocks.has(cacheKey)) {
-        if (this.debug) {
-          this.logger.log(`[CopilotEdge] Cache LOCK HIT (waiting for existing request)`);
-        }
-        await this.cacheLocks.get(cacheKey);
-      }
-
       // Check cache
       const cached = await this.getFromCache(cacheKey);
       if (cached) {
@@ -945,32 +922,22 @@ export class CopilotEdge {
       }
       
       let result;
-      const requestPromise = (async () => {
-        // Handle different request formats
-        if (body.operationName === 'generateCopilotResponse' && body.variables?.data) {
-          return await this.handleGraphQLMutation(body);
-        } else if (body.messages && Array.isArray(body.messages)) {
-          return await this.handleDirectChat(body);
-        } else if (body.operationName) {
-          // This is a valid GraphQL request, but not one we have a specific handler for.
-          // Silently acknowledge it to let CopilotKit operate normally.
-          return { data: {} }; // Default empty success response
-        } else {
-          // This should theoretically not be reached if validation is correct.
-          throw new ValidationError('Unsupported request format');
-        }
-      })();
-
-      this.cacheLocks.set(cacheKey, requestPromise);
-      
-      try {
-        result = await requestPromise;
-        // Cache successful response
-        await this.saveToCache(cacheKey, result);
-      } finally {
-        // Remove the lock
-        this.cacheLocks.delete(cacheKey);
+      // Handle different request formats
+      if (body.operationName === 'generateCopilotResponse' && body.variables?.data) {
+        result = await this.handleGraphQLMutation(body);
+      } else if (body.messages && Array.isArray(body.messages)) {
+        result = await this.handleDirectChat(body);
+      } else if (body.operationName) {
+        // This is a valid GraphQL request, but not one we have a specific handler for.
+        // Silently acknowledge it to let CopilotKit operate normally.
+        result = { data: {} }; // Default empty success response
+      } else {
+        // This should theoretically not be reached if validation is correct.
+        throw new ValidationError('Unsupported request format');
       }
+      
+      // Cache successful response
+      await this.saveToCache(cacheKey, result);
       
       const latency = Math.round(performance.now() - start);
       this.updateMetrics(latency);
@@ -1278,8 +1245,8 @@ export class CopilotEdge {
             !this.isFallbackActive) {
           
           if (this.debug) {
-            const isProduction = process.env.NODE_ENV === 'production';
-            // In production, don't log specific model names
+            const isProduction = true; // Workers is always production-like
+            // Don't log specific model names
             if (isProduction) {
               this.logger.log(`[CopilotEdge] Primary model unavailable, using fallback model`);
             } else {
@@ -1308,6 +1275,11 @@ export class CopilotEdge {
           ? jsonError.message
           : 'Unknown JSON parsing error';
         throw new APIError(`Invalid JSON response: ${errorMessage}`, 500);
+      }
+      
+      // Check if data is null or undefined
+      if (!data) {
+        throw new APIError('Invalid response format: Empty response from Cloudflare AI', 500);
       }
       
       // Handle different response formats based on model type
@@ -1492,7 +1464,7 @@ export class CopilotEdge {
       ? Math.round((this.metrics.fallbackUsed / this.metrics.totalRequests) * 100)
       : 0;
     
-    const isProduction = process.env.NODE_ENV === 'production';
+    const isProduction = true; // Workers is always production-like
     
     const metricsLog = {
       totalRequests: this.metrics.totalRequests,
@@ -1592,11 +1564,8 @@ export class CopilotEdge {
               'Cache-Control': 'no-cache, no-transform',
               'Connection': 'keep-alive',
               'X-Powered-By': 'CopilotEdge',
-              'X-Streaming': 'true',
-              'X-Content-Type-Options': 'nosniff',
-              'X-Frame-Options': 'DENY',
-              'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-              'Referrer-Policy': 'strict-origin-when-cross-origin'
+              'X-Streaming': 'true'
+              // Security headers are added automatically by Cloudflare
             }
           });
         }
@@ -1605,12 +1574,8 @@ export class CopilotEdge {
         return NextResponse.json(result, {
           headers: {
             'X-Powered-By': 'CopilotEdge',
-            'X-Cache': result.cached ? 'HIT' : 'MISS',
-            'X-Content-Type-Options': 'nosniff',
-            'X-Frame-Options': 'DENY',
-            'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-            'Referrer-Policy': 'strict-origin-when-cross-origin'
-            // Removed X-Contained-Sensitive header for security
+            'X-Cache': result.cached ? 'HIT' : 'MISS'
+            // Security headers are added automatically by Cloudflare
           }
         });
       } catch (error: any) {
@@ -1695,23 +1660,6 @@ export class CopilotEdge {
   }
 
   /**
-   * Cleanup method to prevent memory leaks
-   */
-  public async destroy(): Promise<void> {
-    await this.clearCache(false); // Don't clear KV on destroy - it's persistent
-    this.cacheLocks.clear();
-    this.requestCount.clear();
-    // Reset circuit breaker
-    this.circuitBreaker = new CircuitBreaker(
-      this.circuitBreaker.failureThreshold,
-      this.circuitBreaker.openStateTimeout
-    );
-    if (this.debug) {
-      this.logger.log('[CopilotEdge] Instance destroyed and resources cleaned up');
-    }
-  }
-
-  /**
    * Helper method to delay execution (for testing)
    */
   public sleep(ms: number): Promise<void> {
@@ -1733,7 +1681,7 @@ export class CopilotEdge {
     console.log('  Provider:', this.provider);
     
     // Apply production safeguards to model information
-    const isProduction = process.env.NODE_ENV === 'production';
+    const isProduction = true; // Workers is always production-like
     if (isProduction) {
       console.log('  Model:', this.model.includes('/') ? 'custom-model' : this.model);
       console.log('  Fallback:', this.fallbackModel ? 'Configured' : 'None');

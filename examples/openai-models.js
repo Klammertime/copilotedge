@@ -116,9 +116,7 @@ async function testOpenAIIntegration() {
     }
   } finally {
     // Always clean up resources, even if there was an error
-    if (edge) {
-      edge.destroy();
-      console.log('\n🧹 Resources cleaned up');
+    // No cleanup needed - Workers handles this automatically
     }
   }
 }

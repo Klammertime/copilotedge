@@ -10,6 +10,8 @@ The **first and only** adapter that enables [CopilotKit](https://github.com/Copi
 
 ## Why CopilotEdge?
 
+**→ [Read the full explanation: Why CopilotEdge Matters](docs/why-copilotedge.md)** - Practical guide with real examples
+
 **CopilotKit** is an amazing open-source framework for building AI-powered copilots, but it typically requires expensive API calls to OpenAI or other cloud providers. **Cloudflare Workers AI** offers a compelling alternative with:
 
 - **100+ AI models** running on Cloudflare's global edge network
@@ -22,14 +24,21 @@ The **first and only** adapter that enables [CopilotKit](https://github.com/Copi
 **CopilotEdge** bridges this gap, allowing CopilotKit developers to:
 
 - 🚀 Run AI inference at the edge across 100+ global locations
-- 💰 Reduce AI costs by up to 90% with built-in caching
+- 💰 Reduce AI costs by up to 90% with built-in caching (yes, even vs GPT-4o Mini)
 - ⚡ Achieve sub-second response times with edge computing
 - 🔒 Keep sensitive data within Cloudflare's secure infrastructure
 - 🎯 Access OpenAI's open-source gpt-oss models (120B & 20B) via Cloudflare
 
+> **"But GPT-4o Mini is already cheap!"** - [See why that's not the whole story →](docs/why-copilotedge.md#but-gpt-4o-mini-is-already-cheap)
+
 ## Features
 
-- **🎯 Durable Objects Support** - Stateful conversation management **NEW in v0.6.0!**
+- **📊 OpenTelemetry Support** - Production observability **NEW in v0.7.0!**
+  - Distributed tracing across your AI pipeline
+  - Metrics for cache hits, token usage, and latency
+  - Integration with Grafana, Datadog, New Relic, and more
+  - Configurable sampling and graceful degradation
+- **🎯 Durable Objects Support** - Stateful conversation management
   - Persistent conversation history across sessions
   - WebSocket support for real-time bidirectional communication
   - Automatic context management and state persistence
@@ -43,7 +52,7 @@ The **first and only** adapter that enables [CopilotKit](https://github.com/Copi
 - **🔄 Enterprise Resilience** - Built-in retry logic with exponential backoff and jitter
 - **🛡️ Rate Limiting** - In-memory rate limiting to prevent abuse (configurable, works per-instance)
 - **📘 Type Safe** - Full TypeScript support with comprehensive types and IntelliSense
-- **🪶 Lightweight** - Zero runtime dependencies, ~38KB total size
+- **🪶 Lightweight** - Minimal bundle size, ~58KB main module
 - **🧠 OpenAI Open Models** - Support for gpt-oss-120b (80GB GPU) and gpt-oss-20b (16GB edge devices)
 - **🎯 Model Fallbacks** - Automatic failover to alternative models for high availability
 
@@ -96,7 +105,7 @@ These models feature:
 npm install copilotedge
 ```
 
-This will automatically install the necessary CopilotKit packages (`@copilotkit/react-core` and `@copilotkit/react-ui`) for you.
+This will automatically install the necessary dependencies including OpenTelemetry packages for observability.
 
 ### 2. Set Up Environment Variables
 
@@ -169,8 +178,8 @@ CopilotEdge now supports **real-time streaming responses**! Get immediate feedba
 ```typescript
 // Option 1: Enable globally
 const handler = createCopilotEdgeHandler({
-  apiKey: process.env.CLOUDFLARE_API_TOKEN,
-  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+  apiKey: env.CLOUDFLARE_API_TOKEN, // From wrangler.toml bindings
+  accountId: env.CLOUDFLARE_ACCOUNT_ID, // From wrangler.toml bindings
   stream: true, // Enable streaming by default
 });
 
@@ -293,12 +302,74 @@ export default {
 
 See [KV documentation](docs/kv-cache.md) for complete setup guide.
 
+## 🆕 OpenTelemetry Support (v0.7.0)
+
+Production-ready observability with distributed tracing and metrics.
+
+### Enable Telemetry
+
+```typescript
+const edge = new CopilotEdge({
+  model: '@cf/meta/llama-3.1-8b-instruct',
+  
+  telemetry: {
+    enabled: true,
+    serviceName: 'my-ai-service',
+    environment: 'production',
+    
+    // Optional: OTLP endpoint for Grafana/Datadog/New Relic
+    endpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    headers: {
+      'Authorization': `Bearer ${env.TELEMETRY_API_KEY}`
+    },
+    
+    // Performance tuning
+    samplingRate: 0.1, // Sample 10% of requests
+    
+    // Export options
+    exporters: {
+      otlp: true,      // Send to OTLP collector
+      console: false   // Disable console logging in production
+    }
+  }
+});
+```
+
+### What Gets Traced
+
+- **Request lifecycle** - validation, cache lookup, AI calls, response
+- **Cache metrics** - hit/miss rates, latency by type (memory/KV)
+- **AI metrics** - tokens used, model latency, streaming performance
+- **Error tracking** - automatic exception recording with context
+- **Circuit breaker** - state changes and failure patterns
+
+### Platform Integrations
+
+Works with all major observability platforms:
+- **Grafana Cloud** - Full OTLP support with dashboards
+- **Datadog** - APM integration with trace correlation
+- **New Relic** - Distributed tracing across services
+- **Jaeger** - Local development with Docker
+
+See [docs/telemetry.md](docs/telemetry.md) for complete setup guides.
+
+### Benefits
+
+- 📊 **Monitor costs** - Track token usage and cache effectiveness
+- 🔍 **Debug issues** - Trace requests across your entire pipeline
+- ⚡ **Optimize performance** - Identify bottlenecks and latency
+- 🛡️ **Graceful degradation** - Telemetry failures don't affect requests
+- 📈 **Production insights** - Real-time dashboards and alerting
+
 ## Documentation
 
 | Topic                                              | Description                                                                                                                      |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| [**Why CopilotEdge**](docs/why-copilotedge.md)     | 📖 **START HERE** - Practical guide explaining the value and real-world impact                                                   |
+| [**GPT-OSS & Edge**](docs/gpt-oss-and-edge.md)     | 🆕 Understanding local models vs edge computing in production                                                                    |
 | [**Configuration**](docs/configuration.md)         | All options, defaults, and advanced setup                                                                                        |
-| [**Durable Objects**](docs/durable-objects.md)     | ✅ **NEW in v0.6.0!** Stateful conversations with WebSocket support                                                              |
+| [**OpenTelemetry**](docs/telemetry.md)            | ✅ **NEW in v0.7.0!** Production observability with tracing and metrics                                                          |
+| [**Durable Objects**](docs/durable-objects.md)     | Stateful conversations with WebSocket support                                                                                    |
 | [**Workers KV**](docs/kv-cache.md)                 | Persistent global caching setup and configuration                                                                                |
 | [**Supported Models**](docs/models.md)             | Available models, pricing, and updates                                                                                           |
 | [**Error Handling**](docs/errors.md)               | Error types, status codes, and retry strategies                                                                                  |
@@ -307,6 +378,7 @@ See [KV documentation](docs/kv-cache.md) for complete setup guide.
 | [**Benchmarks**](docs/benchmarks.md)               | Performance data and methodology                                                                                                 |
 | [**Troubleshooting**](docs/troubleshooting.md)     | Common issues and solutions                                                                                                      |
 | [**Examples**](docs/examples.md)                   | Implementation patterns and demos                                                                                                |
+| [**Telemetry Example**](examples/telemetry-example.ts) | OpenTelemetry integration examples                                                                                          |
 | [**Streaming Worker**](examples/streaming-worker/) | Hybrid SSE streaming example                                                                                                     |
 
 See [CHANGELOG.md](CHANGELOG.md) for full release history.
@@ -354,7 +426,7 @@ npm run test:coverage     # With coverage
 npm run test:integration  # Miniflare integration tests
 ```
 
-> **Note**: While all 71 functional tests pass, code coverage is currently ~25%. See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for details. We're committed to improving coverage to 80%+ in v0.5.1.
+> **Note**: All 125 functional tests pass with ~32% code coverage. See [KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for details. We're committed to improving coverage to 50%+ in v0.8.0.
 
 ## Contributing
 

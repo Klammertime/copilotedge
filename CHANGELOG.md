@@ -5,6 +5,45 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2025-01-12
+
+### Added
+
+- **🔭 OpenTelemetry Support:** Enterprise-grade observability for AI workloads
+  - Complete distributed tracing for request lifecycle
+  - Automatic span creation for validation, cache, and AI calls
+  - Metrics collection (cache hit rates, AI latency, token usage)
+  - Error tracking with automatic exception recording
+  - Multiple exporter support (Console, OTLP, custom)
+  - Configurable sampling rates for production environments
+  - Graceful degradation when disabled (zero overhead)
+- **Telemetry Configuration:**
+  - `enabled` - Toggle telemetry on/off
+  - `endpoint` - OTLP collector endpoint
+  - `serviceName` - Service identification
+  - `environment` - Deployment environment tagging
+  - `samplingRate` - Control trace sampling (0.0 to 1.0)
+  - `exporters` - Configure multiple export destinations
+- **Comprehensive Testing:** 13 new tests for telemetry functionality
+- **Example Implementation:** Complete telemetry example in `examples/telemetry-example.ts`
+- **Documentation:** Full telemetry guide at `docs/telemetry.md`
+
+### Improved
+
+- Production readiness with enterprise observability capabilities
+- Debugging experience with detailed trace information
+- Performance monitoring with automatic metrics collection
+- Error diagnosis with exception tracking in spans
+- Cost optimization through sampling controls
+
+### Technical Notes
+
+- Uses OpenTelemetry SDK for standards compliance
+- Compatible with Jaeger, Zipkin, and other OTLP collectors
+- Zero performance impact when disabled
+- Automatic context propagation across async operations
+- Follows OpenTelemetry semantic conventions
+
 ## [0.6.0] - 2025-01-11
 
 ### Added
@@ -70,7 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Known Limitations
 
 - Code coverage currently at ~25% (functional tests all passing)
-- See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for details
+- See [KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for details
 - v0.5.1 will focus on improving test coverage to 80%+
 
 ## [0.4.0] - 2025-08-11
