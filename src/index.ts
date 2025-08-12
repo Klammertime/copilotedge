@@ -1,22 +1,23 @@
 /**
  * CopilotEdge - Production-ready adapter for CopilotKit + Cloudflare Workers AI
  * @author Audrey Klammer (@Klammertime)
- * @version 0.7.0
+ * @version 0.8.0
  * @license MIT
  * 
  * Features:
- * - ⚡ Auto-selects fastest Cloudflare edge location
- * - 💾 60-second request caching (reduces costs by up to 90%)
- * - 🔄 Automatic retry with exponential backoff
- * - 🎯 Simple configuration (just needs API key)
- * - 🐛 Debug mode with detailed metrics
- * - 🔒 Input validation and sanitization
- * - 📊 Performance monitoring
+ * - ⚡ Uses Cloudflare's automatic edge routing (closest location)
+ * - 💾 60-second memory cache + optional KV persistence
+ * - 🔄 Automatic retry with exponential backoff and jitter
+ * - 🎯 Simple configuration (just API key & account ID)
+ * - 🐛 Debug mode with performance metrics
+ * - 🔒 DoS protection and input validation
+ * - 📊 OpenTelemetry instrumentation for monitoring
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { TelemetryConfig, TelemetryManager, SpanNames } from './telemetry';
-import { SpanKind } from '@opentelemetry/api';
+import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
+import { getTokenCounter, TokenCounter } from './tokenUtils';
 
 /**
  * Simple logging functions - no classes needed in Workers
@@ -67,11 +68,6 @@ export interface CopilotEdgeConfig {
    * @default 60
    */
   rateLimit?: number;
-  /** 
-   * DANGER: Enable internal sensitive content logging. DO NOT use in production! 
-   * @default false
-   */
-  enableInternalSensitiveLogging?: boolean;
   /** 
    * Timeout for region selection in milliseconds.
    * @default 2000
@@ -325,6 +321,7 @@ export class CopilotEdge {
   private cache: Map<string, { data: any; timestamp: number }>;
   private cacheTimeout: number;
   private apiTimeout: number;
+  private tokenCounter: TokenCounter;
   private maxRetries: number;
   private requestCount: Map<string, number>;
   private rateLimit: number;
@@ -336,7 +333,6 @@ export class CopilotEdge {
     avgLatency: number[];
     fallbackUsed: number;
   };
-  private enableInternalSensitiveLogging: boolean;
   private isFallbackActive: boolean = false;
   private maxRequestSize?: number;
   private maxMessages?: number;
@@ -359,7 +355,8 @@ export class CopilotEdge {
   constructor(config: CopilotEdgeConfig = {}) {
     // Validate and set configuration
     // In Workers, use wrangler.toml bindings or pass config directly
-    // In Node.js environments (like tests), fall back to process.env
+    // IMPORTANT: Keep the process.env fallback - it's necessary for testing!
+    // Tests run in Node.js environment and need to set API credentials via env vars
     this.apiToken = config.apiKey || (typeof process !== 'undefined' ? process.env?.CLOUDFLARE_API_TOKEN : '') || '';
     this.accountId = config.accountId || (typeof process !== 'undefined' ? process.env?.CLOUDFLARE_ACCOUNT_ID : '') || '';
     this.provider = config.provider || DEFAULTS.PROVIDER;
@@ -385,7 +382,6 @@ export class CopilotEdge {
     this.cacheTimeout = config.cacheTimeout || DEFAULTS.CACHE_TIMEOUT;
     this.maxRetries = config.maxRetries || DEFAULTS.MAX_RETRIES;
     this.rateLimit = config.rateLimit || DEFAULTS.RATE_LIMIT;
-    this.enableInternalSensitiveLogging = config.enableInternalSensitiveLogging || false;
     this.apiTimeout = config.apiTimeout || DEFAULTS.API_TIMEOUT;
     this.fetch = config.fetch || global.fetch;
     
@@ -445,7 +441,7 @@ export class CopilotEdge {
       
       this.telemetry = new TelemetryManager({
         ...config.telemetry,
-        serviceVersion: '0.7.0',
+        serviceVersion: '0.8.0',
         attributes: {
           'copilotedge.model_hash': modelHash, // Hashed model identifier
           'copilotedge.model_provider': modelProvider, // Generic provider category
@@ -455,18 +451,18 @@ export class CopilotEdge {
       });
     }
     
+    // Initialize token counter
+    this.tokenCounter = getTokenCounter(this.model);
+    
     if (this.debug) {
-      // Workers is always production-like environment
-      const isProduction = true;
       const logConfig = {
-        // In production, only log generic model info, not specific models
-        model: isProduction ? (this.model.includes('/') ? 'custom-model' : this.model) : this.model,
+        // Always log generic model info for privacy
+        model: this.model.includes('/') ? 'custom-model' : this.model,
         provider: this.provider,
-        fallbackModel: isProduction ? (this.fallbackModel ? 'configured' : 'none') : this.fallbackModel,
+        fallbackModel: this.fallbackModel ? 'configured' : 'none',
         cacheTimeout: this.cacheTimeout,
         maxRetries: this.maxRetries,
         rateLimit: this.rateLimit,
-        enableInternalSensitiveLogging: this.enableInternalSensitiveLogging,
         maxRequestSize: this.maxRequestSize ? `${Math.round(this.maxRequestSize / 1024)}KB` : 'Not Set',
         maxMessages: this.maxMessages || 'Not Set',
         maxMessageSize: this.maxMessageSize ? `${Math.round(this.maxMessageSize / 1024)}KB` : 'Not Set',
@@ -474,11 +470,7 @@ export class CopilotEdge {
       };
       
       this.logger.log('[CopilotEdge] Initialized with:', logConfig);
-      
-      // Add a warning when debug mode is enabled in production
-      if (isProduction) {
-        this.logger.warn('[CopilotEdge] WARNING: Debug mode is enabled in production environment. This may impact performance.');
-      }
+      this.logger.warn('[CopilotEdge] WARNING: Debug mode is enabled. This may impact performance.');
     }
   }
 
@@ -792,31 +784,6 @@ export class CopilotEdge {
     }));
   }
 
-  /**
-   * WARNING: This should only be used for internal monitoring, never exposed to clients.
-   * @param messages The messages to check.
-   * @returns True if sensitive content is detected.
-   */
-  private containsSensitiveContent(messages: any[]): boolean {
-    if (!this.enableInternalSensitiveLogging) {
-      return false; // Feature disabled by default for security
-    }
-    
-    const patterns = [
-      /api[_-]?key/i,
-      /sk_live_/,
-      /pk_live_/,
-      /bearer\s+/i,
-      /password/i,
-      /secret/i,
-      /token/i,
-      /\b[A-Za-z0-9]{32,}\b/ // Long random strings that might be keys
-    ];
-    
-    return messages.some(m => 
-      patterns.some(p => p.test(String(m.content || '')))
-    );
-  }
 
   /**
    * Extracts and sanitizes messages from a request body.
@@ -1172,6 +1139,23 @@ export class CopilotEdge {
     const baseURL = this.getCloudflareApiUrl();
     const activeModel = this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model;
 
+    // Count input tokens
+    const inputTokens = this.tokenCounter.countMessageTokens(messages);
+    
+    // Generate correlation ID for this request
+    const correlationId = `copilot-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    
+    // Start telemetry span for AI call
+    const aiSpan = this.telemetry?.startSpan(SpanNames.AI_CALL, {
+      kind: SpanKind.CLIENT,
+      attributes: {
+        'copilot.model': activeModel,
+        'ai.tokens.input': inputTokens,
+        'correlation.id': correlationId,
+        'copilot.fallback_used': this.isFallbackActive
+      }
+    });
+
     // A list of known chat-optimized model prefixes.
     const chatModelPatterns = [
       '@cf/meta/',
@@ -1212,11 +1196,9 @@ export class CopilotEdge {
           body: JSON.stringify(requestBody),
           signal: AbortSignal.timeout(this.apiTimeout) // 30s timeout
         });
-      } catch (fetchError: unknown) {
+      } catch (fetchError: any) {
         // Handle fetch errors (network issues, etc.)
-        const errorMessage = fetchError instanceof Error 
-          ? fetchError.message 
-          : 'Unknown fetch error';
+        const errorMessage = fetchError.message || 'Fetch error';
         
         if (this.debug) {
           this.logger.log(`[CopilotEdge] Fetch error: ${errorMessage}`);
@@ -1224,10 +1206,6 @@ export class CopilotEdge {
         throw new APIError(`Fetch error: ${errorMessage}`, 500);
       }
 
-      // Check if response is defined before accessing properties
-      if (!response) {
-        throw new APIError('Empty response from Cloudflare AI', 500);
-      }
 
       if (!response.ok) {
         let errorText = '';
@@ -1245,13 +1223,8 @@ export class CopilotEdge {
             !this.isFallbackActive) {
           
           if (this.debug) {
-            const isProduction = true; // Workers is always production-like
-            // Don't log specific model names
-            if (isProduction) {
-              this.logger.log(`[CopilotEdge] Primary model unavailable, using fallback model`);
-            } else {
-              this.logger.log(`[CopilotEdge] Model ${activeModel} unavailable, falling back to ${this.fallbackModel}`);
-            }
+            // Don't log specific model names for privacy
+            this.logger.log(`[CopilotEdge] Primary model unavailable, using fallback model`);
           }
           
           this.isFallbackActive = true;
@@ -1270,11 +1243,8 @@ export class CopilotEdge {
       let data;
       try {
         data = await response.json();
-      } catch (jsonError: unknown) {
-        const errorMessage = jsonError instanceof Error
-          ? jsonError.message
-          : 'Unknown JSON parsing error';
-        throw new APIError(`Invalid JSON response: ${errorMessage}`, 500);
+      } catch (jsonError: any) {
+        throw new APIError(`Invalid JSON response: ${jsonError.message || 'JSON parse error'}`, 500);
       }
       
       // Check if data is null or undefined
@@ -1283,20 +1253,55 @@ export class CopilotEdge {
       }
       
       // Handle different response formats based on model type
+      let responseContent: string;
       if (isChatModel) {
         // Standard chat models return response in choices[0].message.content
         if (!data.choices?.[0]?.message?.content) {
           throw new APIError('Invalid response from Cloudflare AI Chat model', 500);
         }
-        return data.choices[0].message.content;
+        responseContent = data.choices[0].message.content;
       } else {
         // General purpose models return a simpler response structure
         if (data.result?.response) {
-          return data.result.response;
+          responseContent = data.result.response;
+        } else {
+          throw new APIError('Invalid response format from Cloudflare AI Run model', 500);
         }
-        throw new APIError('Invalid response format from Cloudflare AI Run model', 500);
       }
+      
+      // Count output tokens and calculate costs
+      const outputTokens = this.tokenCounter.countTokens(responseContent);
+      const costs = this.tokenCounter.calculateCost(inputTokens, outputTokens, activeModel);
+      
+      // Update telemetry span with token and cost information
+      if (aiSpan) {
+        aiSpan.setAttributes({
+          'ai.tokens.output': outputTokens,
+          'ai.tokens.total': inputTokens + outputTokens,
+          'ai.cost.input_usd': costs.inputCost,
+          'ai.cost.output_usd': costs.outputCost,
+          'ai.cost.total_usd': costs.totalCost,
+          'ai.cost.estimated': false
+        });
+        
+        this.telemetry?.endSpan(SpanNames.AI_CALL, { code: SpanStatusCode.OK });
+      }
+      
+      // Update telemetry metrics
+      this.telemetry?.updateMetrics({
+        tokensProcessed: (this.telemetry?.getMetrics().tokensProcessed || 0) + inputTokens + outputTokens
+      });
+      
+      return responseContent;
     } catch (error) {
+      // Record error in telemetry
+      if (aiSpan && this.telemetry) {
+        this.telemetry.recordError(SpanNames.AI_CALL, error as Error);
+        this.telemetry.endSpan(SpanNames.AI_CALL, { 
+          code: SpanStatusCode.ERROR, 
+          message: (error as Error).message 
+        });
+      }
       throw error;
     }
   }
@@ -1309,6 +1314,24 @@ export class CopilotEdge {
   private async callCloudflareAIStreaming(messages: any[]): Promise<StreamingResponse> {
     const baseURL = this.getCloudflareApiUrl();
     const activeModel = this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model;
+
+    // Count input tokens
+    const inputTokens = this.tokenCounter.countMessageTokens(messages);
+    
+    // Generate correlation ID for this request
+    const correlationId = `copilot-stream-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    
+    // Start telemetry span for AI call
+    const aiSpan = this.telemetry?.startSpan(SpanNames.AI_CALL, {
+      kind: SpanKind.CLIENT,
+      attributes: {
+        'copilot.model': activeModel,
+        'copilot.streaming': true,
+        'ai.tokens.input': inputTokens,
+        'correlation.id': correlationId,
+        'copilot.fallback_used': this.isFallbackActive
+      }
+    });
 
     // Determine if this is a chat model
     const chatModelPatterns = ['@cf/meta/', '@cf/mistral/', '@cf/google/'];
@@ -1355,18 +1378,69 @@ export class CopilotEdge {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let accumulated = '';
+    
+    // Reference to telemetry span and token counter - passed via closure
+    const telemetryManager = this.telemetry;
+    const tokenCounter = this.tokenCounter;
+    const model = activeModel;
+    const inputTokensCount = inputTokens;  // Capture inputTokens for closure
+    const aiSpanRef = aiSpan;  // Capture aiSpan for closure
 
     const stream = async function* (this: CopilotEdge) {
       try {
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            // Stream is complete, calculate final tokens and costs
+            const outputTokens = tokenCounter.countTokens(accumulated);
+            const costs = tokenCounter.calculateCost(inputTokensCount, outputTokens, model);
+            
+            // Update telemetry span with final metrics
+            if (aiSpanRef) {
+              aiSpanRef.setAttributes({
+                'ai.tokens.output': outputTokens,
+                'ai.tokens.total': inputTokensCount + outputTokens,
+                'ai.cost.input_usd': costs.inputCost,
+                'ai.cost.output_usd': costs.outputCost,
+                'ai.cost.total_usd': costs.totalCost,
+                'ai.cost.estimated': false
+              });
+              
+              telemetryManager?.endSpan(SpanNames.AI_CALL, { code: SpanStatusCode.OK });
+            }
+            
+            // Update telemetry metrics
+            telemetryManager?.updateMetrics({
+              tokensProcessed: (telemetryManager?.getMetrics().tokensProcessed || 0) + inputTokensCount + outputTokens
+            });
+            break;
+          }
 
           const chunk = decoder.decode(value, { stream: true });
           const events = parser.parseChunk(chunk);
 
           for (const event of events) {
             if (event.type === 'done') {
+              // Handle done event - calculate final metrics
+              const outputTokens = tokenCounter.countTokens(accumulated);
+              const costs = tokenCounter.calculateCost(inputTokensCount, outputTokens, model);
+              
+              if (aiSpanRef) {
+                aiSpanRef.setAttributes({
+                  'ai.tokens.output': outputTokens,
+                  'ai.tokens.total': inputTokensCount + outputTokens,
+                  'ai.cost.input_usd': costs.inputCost,
+                  'ai.cost.output_usd': costs.outputCost,
+                  'ai.cost.total_usd': costs.totalCost,
+                  'ai.cost.estimated': false
+                });
+                
+                telemetryManager?.endSpan(SpanNames.AI_CALL, { code: SpanStatusCode.OK });
+              }
+              
+              telemetryManager?.updateMetrics({
+                tokensProcessed: (telemetryManager?.getMetrics().tokensProcessed || 0) + inputTokensCount + outputTokens
+              });
               return;
             }
             if (event.type === 'data' && event.content) {
@@ -1391,6 +1465,16 @@ export class CopilotEdge {
             }
           }
         }
+      } catch (error) {
+        // Record error in telemetry
+        if (aiSpanRef && telemetryManager) {
+          telemetryManager.recordError(SpanNames.AI_CALL, error as Error);
+          telemetryManager.endSpan(SpanNames.AI_CALL, { 
+            code: SpanStatusCode.ERROR, 
+            message: (error as Error).message 
+          });
+        }
+        throw error;
       } finally {
         reader.releaseLock();
       }
@@ -1464,8 +1548,6 @@ export class CopilotEdge {
       ? Math.round((this.metrics.fallbackUsed / this.metrics.totalRequests) * 100)
       : 0;
     
-    const isProduction = true; // Workers is always production-like
-    
     const metricsLog = {
       totalRequests: this.metrics.totalRequests,
       cacheHitRate: `${cacheRate}%`,
@@ -1473,10 +1555,8 @@ export class CopilotEdge {
       errors: this.metrics.errors,
       fallbackUsed: this.metrics.fallbackUsed,
       fallbackRate: `${fallbackRate}%`,
-      // In production, only indicate if using primary or fallback, not specific model names
-      activeModel: isProduction 
-        ? (this.isFallbackActive ? 'fallback-model' : 'primary-model') 
-        : (this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model)
+      // Always use generic names for privacy
+      activeModel: this.isFallbackActive ? 'fallback-model' : 'primary-model'
     };
     
     this.logger.log('[CopilotEdge] Metrics:', metricsLog);
@@ -1491,15 +1571,6 @@ export class CopilotEdge {
       try {
         const body = await req.json();
         const result = await this.handleRequest(body);
-        
-        // Check for sensitive content (only for internal logging, NEVER exposed to clients)
-        if (this.enableInternalSensitiveLogging && body.messages && Array.isArray(body.messages)) {
-          const containedSensitive = this.containsSensitiveContent(body.messages);
-          if (containedSensitive && this.debug) {
-            this.logger.warn('[CopilotEdge] WARNING: Potentially sensitive content detected in request');
-            // Log to internal monitoring but NEVER expose to client headers
-          }
-        }
         
         // Check if this is a streaming response
         if (result.streaming && result.stream) {
@@ -1680,15 +1751,9 @@ export class CopilotEdge {
     console.log('  Account ID:', this.accountId ? 'Set' : '❌ Missing');
     console.log('  Provider:', this.provider);
     
-    // Apply production safeguards to model information
-    const isProduction = true; // Workers is always production-like
-    if (isProduction) {
-      console.log('  Model:', this.model.includes('/') ? 'custom-model' : this.model);
-      console.log('  Fallback:', this.fallbackModel ? 'Configured' : 'None');
-    } else {
-      console.log('  Model:', this.model);
-      console.log('  Fallback:', this.fallbackModel || 'None');
-    }
+    // Always use generic names for privacy
+    console.log('  Model:', this.model.includes('/') ? 'custom-model' : this.model);
+    console.log('  Fallback:', this.fallbackModel ? 'Configured' : 'None');
     
     console.log('  Debug:', this.debug ? 'ON' : 'OFF');
     

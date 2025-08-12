@@ -291,12 +291,67 @@ const conditionalTelemetry = new CopilotEdge({
   }
 });
 
+// Example 11: Cost Tracking and Monitoring (NEW in v0.8.0!)
+const costTrackingTelemetry = new CopilotEdge({
+  model: '@cf/meta/llama-3.1-70b-instruct', // Larger model for cost demo
+  apiKey: env.CLOUDFLARE_API_TOKEN,
+  accountId: env.CLOUDFLARE_ACCOUNT_ID,
+  
+  telemetry: {
+    enabled: true,
+    
+    // Auto-discovery: Will use these env vars if endpoint not specified:
+    // - COPILOTEDGE_TELEMETRY_ENDPOINT
+    // - COPILOTEDGE_DASHBOARD_URL
+    endpoint: process.env.COPILOTEDGE_TELEMETRY_ENDPOINT || 
+              'https://dash.copilotedge.io/otlp',
+    
+    serviceName: 'copilotedge-cost-tracking',
+    environment: 'production',
+    
+    // Track costs for budget monitoring
+    attributes: {
+      'budget.team': 'ai-platform',
+      'budget.project': 'customer-support',
+      'budget.monthly_limit_usd': '1000'
+    },
+    
+    // Sample everything to capture all costs
+    samplingRate: 1.0,
+    
+    exporters: {
+      otlp: true
+    }
+  }
+});
+
+/*
+The telemetry will now include these cost tracking attributes:
+- ai.tokens.input: Actual input token count (using tiktoken)
+- ai.tokens.output: Actual output token count  
+- ai.tokens.total: Combined token usage
+- ai.cost.input_usd: Cost for input tokens in USD
+- ai.cost.output_usd: Cost for output tokens in USD
+- ai.cost.total_usd: Total request cost in USD
+- correlation.id: Unique identifier for request tracking
+- conversation.id: Track multi-turn conversations
+- user.id: User-level cost attribution
+
+Use these metrics to:
+1. Monitor AI spending in real-time
+2. Set up cost alerts when approaching budget limits
+3. Identify expensive queries or users
+4. Optimize model selection based on cost/performance
+5. Generate cost reports by team/project/user
+*/
+
 // Export for use in your application
 export {
   basicTelemetry,
   productionTelemetry,
   developmentTelemetry,
   jaegerTelemetry,
+  costTrackingTelemetry,
   customExporterTelemetry,
   grafanaCloudTelemetry,
   datadogTelemetry,

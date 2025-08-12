@@ -1,11 +1,12 @@
 # OpenTelemetry Integration Guide
 
-CopilotEdge v0.7.0 introduces comprehensive OpenTelemetry support for production observability. This guide covers configuration, integration with popular platforms, and best practices.
+CopilotEdge v0.8.0 provides comprehensive OpenTelemetry support with **real-time cost tracking** for production observability. This guide covers configuration, integration with popular platforms, and best practices.
 
 ## Table of Contents
 
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [Cost Tracking (NEW v0.8.0)](#cost-tracking-new-v080)
 - [Metrics & Traces](#metrics--traces)
 - [Platform Integrations](#platform-integrations)
 - [Best Practices](#best-practices)
@@ -39,11 +40,14 @@ interface TelemetryConfig {
   // Core settings
   enabled: boolean;                    // Enable/disable telemetry
   serviceName?: string;                 // Service identifier (default: 'copilotedge')
-  serviceVersion?: string;              // Version tracking
+  serviceVersion?: string;              // Version tracking (default: '0.8.0')
   environment?: string;                 // Environment (production, staging, development)
   
-  // Export settings
+  // Export settings (NEW: Auto-discovery in v0.8.0)
   endpoint?: string;                    // OTLP collector endpoint
+                                       // Auto-discovers from env vars:
+                                       // - COPILOTEDGE_TELEMETRY_ENDPOINT
+                                       // - COPILOTEDGE_DASHBOARD_URL
   exportInterval?: number;              // Export interval in ms (default: 10000)
   headers?: Record<string, string>;     // Auth headers for collector
   
@@ -87,6 +91,80 @@ const telemetryConfig: TelemetryConfig = {
 };
 ```
 
+## Cost Tracking (NEW v0.8.0)
+
+CopilotEdge v0.8.0 introduces **real-time cost tracking** with accurate token counting using tiktoken.
+
+### Token Counting
+
+Every AI request now includes accurate token counts:
+
+```typescript
+// Automatically added to every span:
+{
+  'ai.tokens.input': 1234,      // Actual input tokens (not estimated!)
+  'ai.tokens.output': 567,       // Actual output tokens
+  'ai.tokens.total': 1801,       // Total tokens used
+}
+```
+
+### Cost Calculation
+
+Costs are calculated based on model-specific pricing:
+
+```typescript
+// Cost attributes in USD:
+{
+  'ai.cost.input_usd': 0.001234,   // Cost for input tokens
+  'ai.cost.output_usd': 0.001701,  // Cost for output tokens
+  'ai.cost.total_usd': 0.002935,   // Total request cost
+  'ai.cost.estimated': false        // Using real token counts
+}
+```
+
+### Correlation IDs
+
+Track requests across distributed systems:
+
+```typescript
+{
+  'correlation.id': 'copilot-1234567890-abc123',  // Unique request ID
+  'conversation.id': 'conv-xyz789',               // Track conversations
+  'user.id': 'user-456'                          // User attribution
+}
+```
+
+### Cost Monitoring Example
+
+```typescript
+const copilot = new CopilotEdge({
+  model: '@cf/meta/llama-3.1-70b-instruct',
+  
+  telemetry: {
+    enabled: true,
+    serviceName: 'ai-cost-monitor',
+    
+    // Track budget allocation
+    attributes: {
+      'budget.team': 'customer-support',
+      'budget.monthly_limit_usd': '1000',
+      'cost.center': 'operations'
+    },
+    
+    // Sample everything for accurate cost tracking
+    samplingRate: 1.0
+  }
+});
+```
+
+### Using Cost Metrics
+
+1. **Budget Alerts**: Set up alerts when costs exceed thresholds
+2. **Cost Attribution**: Track costs by user, team, or project
+3. **Model Optimization**: Compare cost/performance across models
+4. **Usage Reports**: Generate detailed cost breakdowns
+5. **Anomaly Detection**: Identify unusually expensive queries
+
 ## Metrics & Traces
 
 ### Automatic Instrumentation
@@ -108,13 +186,18 @@ copilotedge.request (root span)
 └── copilotedge.response
 ```
 
-#### Span Attributes
+#### Span Attributes (Enhanced in v0.8.0)
 
 Each span includes relevant attributes:
 
-- **Request Span**: `request.size`, `request.type`, `model.id`, `cache.hit`
+- **Request Span**: `request.size`, `request.type`, `model.id`, `cache.hit`, `correlation.id`
 - **Cache Spans**: `cache.type`, `cache.latency_ms`, `cache.hit`
-- **AI Spans**: `ai.model`, `ai.provider`, `ai.prompt_tokens`, `ai.completion_tokens`, `ai.latency_ms`
+- **AI Spans** (v0.8.0): 
+  - `ai.model`, `ai.provider`
+  - `ai.tokens.input`, `ai.tokens.output`, `ai.tokens.total` (real counts via tiktoken)
+  - `ai.cost.input_usd`, `ai.cost.output_usd`, `ai.cost.total_usd`
+  - `ai.latency_ms`, `correlation.id`
+  - `conversation.id`, `user.id` (if provided)
 - **Error Spans**: `error.type`, `error.message`, `error.stack`
 
 ### Custom Metrics

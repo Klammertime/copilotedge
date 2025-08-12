@@ -95,6 +95,18 @@ export interface CopilotSpanAttributes extends Attributes {
   'copilot.tokens.output'?: number;
   'copilot.retry_count'?: number;
   'copilot.fallback_used'?: boolean;
+  // New AI-specific attributes
+  'ai.tokens.input'?: number;
+  'ai.tokens.output'?: number;
+  'ai.tokens.total'?: number;
+  'ai.cost.input_usd'?: number;
+  'ai.cost.output_usd'?: number;
+  'ai.cost.total_usd'?: number;
+  'ai.cost.estimated'?: boolean;
+  // Correlation IDs
+  'correlation.id'?: string;
+  'conversation.id'?: string;
+  'user.id'?: string;
 }
 
 /**
@@ -115,9 +127,18 @@ export class TelemetryManager {
   };
   
   constructor(config: TelemetryConfig) {
-    this.config = config;
+    // Auto-discovery of telemetry endpoint
+    const autoConfig = {
+      ...config,
+      endpoint: config.endpoint || 
+                process.env.COPILOTEDGE_TELEMETRY_ENDPOINT || 
+                process.env.COPILOTEDGE_DASHBOARD_URL ||
+                (config.enabled ? 'https://dash.copilotedge.io/otlp' : undefined)
+    };
     
-    if (config.enabled) {
+    this.config = autoConfig;
+    
+    if (autoConfig.enabled) {
       this.initialize();
     }
   }
@@ -146,7 +167,7 @@ export class TelemetryManager {
       // Get a tracer
       this.tracer = trace.getTracer(
         this.config.serviceName || 'copilotedge',
-        this.config.serviceVersion || '0.7.0'
+        this.config.serviceVersion || '0.8.0'
       );
     } catch (error) {
       console.error('[Telemetry] Initialization failed:', error);

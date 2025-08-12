@@ -33,8 +33,10 @@ The **first and only** adapter that enables [CopilotKit](https://github.com/Copi
 
 ## Features
 
-- **📊 OpenTelemetry Support** - Production observability **NEW in v0.7.0!**
+- **📊 OpenTelemetry Support** - Production observability with AI cost tracking **v0.8.0!**
   - Distributed tracing across your AI pipeline
+  - **Real token counting** with tiktoken (not estimates!)
+  - **Cost tracking** per request in USD
   - Metrics for cache hits, token usage, and latency
   - Integration with Grafana, Datadog, New Relic, and more
   - Configurable sampling and graceful degradation
@@ -302,11 +304,11 @@ export default {
 
 See [KV documentation](docs/kv-cache.md) for complete setup guide.
 
-## 🆕 OpenTelemetry Support (v0.7.0)
+## 🆕 OpenTelemetry Support (v0.8.0)
 
-Production-ready observability with distributed tracing and metrics.
+Production-ready observability with distributed tracing, metrics, and **real-time cost tracking**.
 
-### Enable Telemetry
+### Enable Telemetry with Cost Tracking
 
 ```typescript
 const edge = new CopilotEdge({
@@ -317,7 +319,8 @@ const edge = new CopilotEdge({
     serviceName: 'my-ai-service',
     environment: 'production',
     
-    // Optional: OTLP endpoint for Grafana/Datadog/New Relic
+    // Auto-discovery: Uses env vars if endpoint not specified
+    // COPILOTEDGE_TELEMETRY_ENDPOINT or COPILOTEDGE_DASHBOARD_URL
     endpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT,
     headers: {
       'Authorization': `Bearer ${env.TELEMETRY_API_KEY}`
@@ -335,13 +338,26 @@ const edge = new CopilotEdge({
 });
 ```
 
-### What Gets Traced
+### What Gets Traced (NEW in v0.8.0!)
 
 - **Request lifecycle** - validation, cache lookup, AI calls, response
 - **Cache metrics** - hit/miss rates, latency by type (memory/KV)
-- **AI metrics** - tokens used, model latency, streaming performance
+- **AI metrics** - Real token counts (input/output/total), not estimates!
+- **Cost tracking** - Actual USD costs per request (`ai.cost.input_usd`, `ai.cost.output_usd`, `ai.cost.total_usd`)
+- **Correlation IDs** - Track requests across distributed systems
 - **Error tracking** - automatic exception recording with context
 - **Circuit breaker** - state changes and failure patterns
+
+#### New Telemetry Attributes (v0.8.0)
+- `ai.tokens.input` - Actual input token count using tiktoken
+- `ai.tokens.output` - Actual output token count
+- `ai.tokens.total` - Combined token usage
+- `ai.cost.input_usd` - Input cost in USD
+- `ai.cost.output_usd` - Output cost in USD  
+- `ai.cost.total_usd` - Total request cost
+- `correlation.id` - Unique request identifier
+- `conversation.id` - Track conversation threads
+- `user.id` - User-level tracking
 
 ### Platform Integrations
 
@@ -368,7 +384,7 @@ See [docs/telemetry.md](docs/telemetry.md) for complete setup guides.
 | [**Why CopilotEdge**](docs/why-copilotedge.md)     | 📖 **START HERE** - Practical guide explaining the value and real-world impact                                                   |
 | [**GPT-OSS & Edge**](docs/gpt-oss-and-edge.md)     | 🆕 Understanding local models vs edge computing in production                                                                    |
 | [**Configuration**](docs/configuration.md)         | All options, defaults, and advanced setup                                                                                        |
-| [**OpenTelemetry**](docs/telemetry.md)            | ✅ **NEW in v0.7.0!** Production observability with tracing and metrics                                                          |
+| [**OpenTelemetry**](docs/telemetry.md)            | ✅ **v0.8.0!** Production observability with tracing, metrics, and cost tracking                                                 |
 | [**Durable Objects**](docs/durable-objects.md)     | Stateful conversations with WebSocket support                                                                                    |
 | [**Workers KV**](docs/kv-cache.md)                 | Persistent global caching setup and configuration                                                                                |
 | [**Supported Models**](docs/models.md)             | Available models, pricing, and updates                                                                                           |

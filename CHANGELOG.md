@@ -5,6 +5,46 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2025-01-12
+
+### Added
+
+- **💰 Token Counting & Cost Tracking:** Real-time AI cost monitoring
+  - Accurate token counting using tiktoken library
+  - Per-request cost calculation for all supported models
+  - Cost breakdown by input/output tokens
+  - Model-specific pricing configurations
+  - Token metrics in OpenTelemetry spans (`ai.tokens.input`, `ai.tokens.output`, `ai.tokens.total`)
+  - Cost attributes in telemetry (`ai.cost.input_usd`, `ai.cost.output_usd`, `ai.cost.total_usd`)
+  
+- **🔍 Enhanced Telemetry Attributes:**
+  - Request correlation IDs for distributed tracing
+  - Conversation and user ID tracking
+  - Automatic dashboard endpoint discovery via environment variables
+  - `COPILOTEDGE_TELEMETRY_ENDPOINT` environment variable support
+  - `COPILOTEDGE_DASHBOARD_URL` fallback for telemetry endpoint
+
+- **⚡ Performance Improvements:**
+  - OTLP batching already implemented in v0.7.0, now properly configured
+  - Optimized token counting with singleton pattern
+  - Efficient streaming response token tracking
+
+### Improved
+
+- Token counting for both standard and streaming responses
+- Cost visibility for AI operations monitoring
+- Dashboard integration with auto-discovery
+- Production telemetry with meaningful cost metrics
+- Better observability for AI spending patterns
+
+### Technical Notes
+
+- Uses js-tiktoken for OpenAI-compatible token counting
+- Supports all Cloudflare Workers AI models with estimated pricing
+- Token counts work with streaming responses
+- Zero overhead when telemetry is disabled
+- Compatible with dashboard telemetry collectors
+
 ## [0.7.0] - 2025-01-12
 
 ### Added
