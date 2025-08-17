@@ -827,6 +827,9 @@ export class CopilotEdge {
     const start = performance.now();
     this.metrics.totalRequests++;
     
+    // Extract conversation ID if present
+    const conversationId = body.conversationId || this.defaultConversationId;
+    
     // Wrap entire request in telemetry span if enabled
     if (this.telemetry) {
       return this.telemetry.withSpan(
@@ -843,7 +846,11 @@ export class CopilotEdge {
           kind: SpanKind.SERVER,
           attributes: {
             'request.size': JSON.stringify(body).length,
-            'request.type': body.operationName ? 'graphql' : 'chat'
+            'request.type': body.operationName ? 'graphql' : 'chat',
+            ...(conversationId && {
+              'conversation.id': conversationId,
+              'copilot.conversation_id': conversationId
+            })
           }
         }
       );
@@ -949,8 +956,13 @@ export class CopilotEdge {
       return this.createDefaultResponse(body.variables.data.threadId);
     }
     
+    // Extract conversation ID from GraphQL variables if available
+    const conversationId = body.variables?.data?.conversationId || 
+                          body.variables?.data?.threadId || 
+                          this.defaultConversationId;
+    
     const response = await this.retryWithBackoff(
-      async () => await this.callCloudflareAI(sanitized),
+      async () => await this.callCloudflareAI(sanitized, conversationId),
       'Cloudflare AI'
     );
     
@@ -989,12 +1001,12 @@ export class CopilotEdge {
       throw new ValidationError('Request body must contain messages.');
     }
     
+    // Extract conversation ID for tracking (used for both telemetry and conversation management)
+    const conversationId = body.conversationId || this.defaultConversationId;
+    
     // Handle conversation management if enabled
-    if (this.enableConversations && this.conversationDO) {
-      const conversationId = body.conversationId || this.defaultConversationId;
-      
-      if (conversationId) {
-        try {
+    if (this.enableConversations && this.conversationDO && conversationId) {
+      try {
           // Get or create conversation Durable Object
           const doId = this.conversationDO.idFromName(conversationId);
           const conversationStub = this.conversationDO.get(doId);
@@ -1029,7 +1041,6 @@ export class CopilotEdge {
         } catch (error) {
           // Log error but continue without conversation history
           this.logger.warn('[CopilotEdge] Failed to load conversation history:', error);
-        }
       }
     }
     
@@ -1039,7 +1050,7 @@ export class CopilotEdge {
     if (useStreaming) {
       // Return a streaming response
       const streamingResponse = await this.retryWithBackoff(
-        async () => await this.callCloudflareAIStreaming(sanitized!),
+        async () => await this.callCloudflareAIStreaming(sanitized!, conversationId),
         'Cloudflare AI Streaming'
       );
       
@@ -1056,15 +1067,12 @@ export class CopilotEdge {
     } else {
       // Non-streaming response (existing code)
       const response = await this.retryWithBackoff(
-        async () => await this.callCloudflareAI(sanitized!),
+        async () => await this.callCloudflareAI(sanitized!, conversationId),
         'Cloudflare AI'
       );
       
       // Save to conversation if enabled
-      if (this.enableConversations && this.conversationDO) {
-        const conversationId = body.conversationId || this.defaultConversationId;
-        
-        if (conversationId) {
+      if (this.enableConversations && this.conversationDO && conversationId) {
           try {
             const doId = this.conversationDO.idFromName(conversationId);
             const conversationStub = this.conversationDO.get(doId);
@@ -1105,7 +1113,6 @@ export class CopilotEdge {
           } catch (error) {
             this.logger.warn('[CopilotEdge] Failed to save to conversation:', error);
           }
-        }
       }
       
       return {
@@ -1133,9 +1140,10 @@ export class CopilotEdge {
   /**
    * Call the Cloudflare Workers AI API.
    * @param messages - The sanitized messages to send.
+   * @param conversationId - Optional conversation ID for tracking.
    * @returns The AI's response content as a string.
    */
-  private async callCloudflareAI(messages: any[]): Promise<string> {
+  private async callCloudflareAI(messages: any[], conversationId?: string): Promise<string> {
     const baseURL = this.getCloudflareApiUrl();
     const activeModel = this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model;
 
@@ -1152,7 +1160,11 @@ export class CopilotEdge {
         'copilot.model': activeModel,
         'ai.tokens.input': inputTokens,
         'correlation.id': correlationId,
-        'copilot.fallback_used': this.isFallbackActive
+        'copilot.fallback_used': this.isFallbackActive,
+        ...(conversationId && {
+          'conversation.id': conversationId,
+          'copilot.conversation_id': conversationId
+        })
       }
     });
 
@@ -1231,7 +1243,7 @@ export class CopilotEdge {
           this.metrics.fallbackUsed++;
           
           // Retry with fallback model
-          return await this.callCloudflareAI(messages);
+          return await this.callCloudflareAI(messages, conversationId);
         }
         
         throw new APIError(
@@ -1309,9 +1321,10 @@ export class CopilotEdge {
   /**
    * Call the Cloudflare Workers AI API with streaming support.
    * @param messages - The sanitized messages to send.
+   * @param conversationId - Optional conversation ID for tracking.
    * @returns A streaming response that can be consumed as an async generator.
    */
-  private async callCloudflareAIStreaming(messages: any[]): Promise<StreamingResponse> {
+  private async callCloudflareAIStreaming(messages: any[], conversationId?: string): Promise<StreamingResponse> {
     const baseURL = this.getCloudflareApiUrl();
     const activeModel = this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model;
 
@@ -1329,7 +1342,11 @@ export class CopilotEdge {
         'copilot.streaming': true,
         'ai.tokens.input': inputTokens,
         'correlation.id': correlationId,
-        'copilot.fallback_used': this.isFallbackActive
+        'copilot.fallback_used': this.isFallbackActive,
+        ...(conversationId && {
+          'conversation.id': conversationId,
+          'copilot.conversation_id': conversationId
+        })
       }
     });
 
