@@ -1,7 +1,7 @@
 /**
  * CopilotEdge - Production-ready adapter for CopilotKit + Cloudflare Workers AI
  * @author Audrey Klammer (@Klammertime)
- * @version 0.8.0
+ * @version 0.9.0
  * @license MIT
  * 
  * Features:
@@ -455,7 +455,7 @@ export class CopilotEdge {
       this.telemetry = new TelemetryManager({
         ...config.telemetry,
         environment,
-        serviceVersion: '0.8.0',
+        serviceVersion: '0.9.0',
         attributes: {
           'copilotedge.model_hash': modelHash, // Hashed model identifier
           'copilotedge.model_provider': modelProvider, // Generic provider category

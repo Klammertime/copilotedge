@@ -5,6 +5,78 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2025-01-17
+
+### Added
+
+- **🎯 Complete TypeScript Export Support:**
+  - All types and interfaces now properly exported
+  - Full IntelliSense support for `CopilotEdgeConfig`, `CopilotEdgeMetrics`, etc.
+  - Re-exported telemetry types (`TelemetryConfig`, `TelemetryMetrics`, `TelemetryManager`)
+  - Re-exported token utilities (`TokenCounter`, `getTokenCounter`, `MODEL_PRICING`)
+  - Named exports for all classes and utilities
+  
+- **🔧 Environment Auto-Discovery:**
+  - `COPILOTEDGE_API_KEY` - Auto-discover API key (priority over `CLOUDFLARE_API_TOKEN`)
+  - `COPILOTEDGE_ACCOUNT_ID` - Auto-discover account ID (priority over `CLOUDFLARE_ACCOUNT_ID`)
+  - `COPILOTEDGE_ENVIRONMENT` - Auto-discover deployment environment (falls back to `NODE_ENV`)
+  - `COPILOTEDGE_TELEMETRY_ENDPOINT` - Already supported, now documented
+  - Priority order: explicit config > COPILOTEDGE_* > standard env vars > defaults
+  
+- **📊 Enhanced Response Headers:**
+  - `X-CopilotEdge-Cache-Hit-Rate` - Current cache hit rate (0-1)
+  - `X-CopilotEdge-Model` - Model used for the request
+  - `X-CopilotEdge-Latency` - Request processing time in ms
+  
+- **📚 Comprehensive API Documentation:**
+  - Complete API reference at `docs/api-reference.md`
+  - All import patterns documented (ES modules, CommonJS, dynamic)
+  - TypeScript types and interfaces fully documented
+  - OTLP endpoint formats and requirements for all platforms
+  - Token counting accuracy details and methodology
+  - Cost calculation formulas with per-model pricing
+
+### Fixed
+
+- **Module Export Issues:**
+  - All internal modules (`telemetry`, `tokenUtils`, `durable-objects`) now properly bundled
+  - Package can be imported normally without workarounds
+  - Dynamic imports no longer required
+  
+### Improved
+
+- **Developer Experience:**
+  - Minimal configuration required with environment auto-discovery
+  - Better TypeScript support with all types exported
+  - Clearer import patterns in documentation
+  - Response headers for easier debugging
+
+### Migration Guide
+
+From v0.8.x to v0.9.0 - No breaking changes, only improvements:
+
+```typescript
+// New: All types and utilities now available as named exports
+import {
+  CopilotEdge,
+  createCopilotEdgeHandler,
+  TokenCounter,
+  TelemetryManager,
+  type CopilotEdgeConfig,
+  type CopilotEdgeMetrics
+} from 'copilotedge';
+
+// New: Environment auto-discovery (set these env vars)
+COPILOTEDGE_API_KEY=your-key
+COPILOTEDGE_ENVIRONMENT=production
+
+// Minimal config with auto-discovery
+const copilot = new CopilotEdge({
+  telemetry: { enabled: true }
+  // Everything else auto-discovered!
+});
+```
+
 ## [0.8.0] - 2025-01-12
 
 ### Added
