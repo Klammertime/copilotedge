@@ -55,6 +55,7 @@ export interface TelemetryConfig {
   endpoint?: string;
   serviceName?: string;
   serviceVersion?: string;
+  environment?: string;  // Deployment environment (production, staging, development)
   exportInterval?: number;
   headers?: Record<string, string>;
   attributes?: Record<string, string>;

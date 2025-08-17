@@ -126,6 +126,7 @@ CLOUDFLARE_ACCOUNT_ID=your-account-id-here
 ```typescript
 // app/api/copilotedge/route.ts (Next.js App Router)
 import { createCopilotEdgeHandler } from "copilotedge";
+import type { CopilotEdgeConfig } from "copilotedge"; // Optional: for TypeScript
 
 // Basic setup
 export const POST = createCopilotEdgeHandler({
@@ -134,11 +135,18 @@ export const POST = createCopilotEdgeHandler({
 });
 
 // With OpenAI open-source model and fallback
-// export const POST = createCopilotEdgeHandler({
+// const config: CopilotEdgeConfig = {
 //   model: '@cf/openai/gpt-oss-120b',           // OpenAI's open 120B model (Apache 2.0)
-//   fallback: '@cf/openai/gpt-oss-20b'          // Lighter 20B model as fallback
-// });
+//   fallback: '@cf/openai/gpt-oss-20b',         // Lighter 20B model as fallback
+//   telemetry: {                                // Optional: Enable telemetry
+//     enabled: true,
+//     serviceName: 'my-ai-service'
+//   }
+// };
+// export const POST = createCopilotEdgeHandler(config);
 ```
+
+📚 **[See complete import patterns and TypeScript types →](docs/api-reference.md#installation--import)**
 
 ### 4. Configure CopilotKit
 
@@ -381,6 +389,7 @@ See [docs/telemetry.md](docs/telemetry.md) for complete setup guides.
 
 | Topic                                              | Description                                                                                                                      |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| [**API Reference**](docs/api-reference.md)         | 📚 **Complete API documentation** - Types, imports, telemetry, token counting                                                    |
 | [**Why CopilotEdge**](docs/why-copilotedge.md)     | 📖 **START HERE** - Practical guide explaining the value and real-world impact                                                   |
 | [**GPT-OSS & Edge**](docs/gpt-oss-and-edge.md)     | 🆕 Understanding local models vs edge computing in production                                                                    |
 | [**Configuration**](docs/configuration.md)         | All options, defaults, and advanced setup                                                                                        |
@@ -401,33 +410,49 @@ See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
 ## API Reference
 
-### `createCopilotEdgeHandler(config)`
+📚 **[Complete API Documentation →](docs/api-reference.md)**
+
+The full API reference includes:
+- **Import patterns** for ES modules, CommonJS, and dynamic imports
+- **TypeScript types** and interfaces with full IntelliSense support
+- **Telemetry configuration** with OTLP endpoints for all platforms
+- **Token counting** implementation details and accuracy
+- **Cost calculation** methodology with per-model pricing
+- **Response headers** for debugging and monitoring
+
+### Quick Reference
+
+#### `createCopilotEdgeHandler(config)`
 
 Creates a Next.js API route handler.
 
 ```typescript
-const handler = createCopilotEdgeHandler({
-  apiKey: string, // Required (or CLOUDFLARE_API_TOKEN env var)
-  accountId: string, // Required (or CLOUDFLARE_ACCOUNT_ID env var)
-  model: string, // Default: '@cf/meta/llama-3.1-8b-instruct'
-  provider: string, // Default: 'cloudflare'
-  fallback: string, // Optional fallback model
-  debug: boolean, // Default: false
-  cacheTimeout: number, // Default: 60000 (ms)
-  maxRetries: number, // Default: 3
-  rateLimit: number, // Default: 60 (requests/min)
-  enableInternalSensitiveLogging: boolean, // DANGER: See docs/security.md
-});
+import { createCopilotEdgeHandler } from "copilotedge";
+import type { CopilotEdgeConfig } from "copilotedge";
+
+const config: CopilotEdgeConfig = {
+  apiKey: string,       // Required (or CLOUDFLARE_API_TOKEN env var)
+  accountId: string,    // Required (or CLOUDFLARE_ACCOUNT_ID env var)
+  model: string,        // Default: '@cf/meta/llama-3.1-8b-instruct'
+  fallback: string,     // Optional fallback model
+  telemetry: {          // Optional telemetry config
+    enabled: boolean,
+    serviceName: string,
+    endpoint: string,
+  },
+  // ... see full config in API docs
+};
+
+export const POST = createCopilotEdgeHandler(config);
 ```
 
-See [Configuration](docs/configuration.md) for detailed options.
-
-### `CopilotEdge` Class
+#### `CopilotEdge` Class
 
 For advanced use cases:
 
 ```typescript
-import CopilotEdge from "copilotedge";
+import { CopilotEdge } from "copilotedge";
+import type { CopilotEdgeConfig, CopilotEdgeMetrics } from "copilotedge";
 
 const edge = new CopilotEdge(config);
 const response = await edge.handleRequest(body);

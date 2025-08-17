@@ -353,12 +353,19 @@ export class CopilotEdge {
    * @param config - Configuration options for CopilotEdge.
    */
   constructor(config: CopilotEdgeConfig = {}) {
-    // Validate and set configuration
+    // Validate and set configuration with environment auto-discovery
     // In Workers, use wrangler.toml bindings or pass config directly
     // IMPORTANT: Keep the process.env fallback - it's necessary for testing!
     // Tests run in Node.js environment and need to set API credentials via env vars
-    this.apiToken = config.apiKey || (typeof process !== 'undefined' ? process.env?.CLOUDFLARE_API_TOKEN : '') || '';
-    this.accountId = config.accountId || (typeof process !== 'undefined' ? process.env?.CLOUDFLARE_ACCOUNT_ID : '') || '';
+    // Auto-discovery order: config > COPILOTEDGE_* > CLOUDFLARE_*
+    this.apiToken = config.apiKey || 
+                   (typeof process !== 'undefined' ? process.env?.COPILOTEDGE_API_KEY : '') ||
+                   (typeof process !== 'undefined' ? process.env?.CLOUDFLARE_API_TOKEN : '') || 
+                   '';
+    this.accountId = config.accountId || 
+                    (typeof process !== 'undefined' ? process.env?.COPILOTEDGE_ACCOUNT_ID : '') ||
+                    (typeof process !== 'undefined' ? process.env?.CLOUDFLARE_ACCOUNT_ID : '') || 
+                    '';
     this.provider = config.provider || DEFAULTS.PROVIDER;
     
     // Handle model configuration with provider and fallback support
@@ -439,13 +446,21 @@ export class CopilotEdge {
                            this.model.startsWith('@cf/openai/') ? 'openai' :
                            'other';
       
+      // Auto-discover environment from env vars
+      const environment = config.telemetry.environment || 
+                         (typeof process !== 'undefined' ? process.env?.COPILOTEDGE_ENVIRONMENT : '') ||
+                         (typeof process !== 'undefined' ? process.env?.NODE_ENV : '') ||
+                         'production';
+      
       this.telemetry = new TelemetryManager({
         ...config.telemetry,
+        environment,
         serviceVersion: '0.8.0',
         attributes: {
           'copilotedge.model_hash': modelHash, // Hashed model identifier
           'copilotedge.model_provider': modelProvider, // Generic provider category
           'copilotedge.provider': this.provider,
+          'deployment.environment': environment,
           ...config.telemetry.attributes
         }
       });
@@ -1585,6 +1600,7 @@ export class CopilotEdge {
    */
   public createNextHandler() {
     return async (req: NextRequest): Promise<NextResponse> => {
+      const startTime = performance.now();
       try {
         const body = await req.json();
         const result = await this.handleRequest(body);
@@ -1646,23 +1662,35 @@ export class CopilotEdge {
             }
           });
           
+          const metrics = this.getMetrics();
+          const latency = Math.round(performance.now() - startTime);
+          
           return new NextResponse(stream, {
             headers: {
               'Content-Type': 'text/event-stream',
               'Cache-Control': 'no-cache, no-transform',
               'Connection': 'keep-alive',
               'X-Powered-By': 'CopilotEdge',
-              'X-Streaming': 'true'
+              'X-Streaming': 'true',
+              'X-CopilotEdge-Cache-Hit-Rate': String(metrics.cacheHitRate.toFixed(2)),
+              'X-CopilotEdge-Model': this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model,
+              'X-CopilotEdge-Latency': `${latency}ms`
               // Security headers are added automatically by Cloudflare
             }
           });
         }
         
         // Non-streaming response
+        const metrics = this.getMetrics();
+        const latency = Math.round(performance.now() - startTime);
+        
         return NextResponse.json(result, {
           headers: {
             'X-Powered-By': 'CopilotEdge',
-            'X-Cache': result.cached ? 'HIT' : 'MISS'
+            'X-Cache': result.cached ? 'HIT' : 'MISS',
+            'X-CopilotEdge-Cache-Hit-Rate': String(metrics.cacheHitRate.toFixed(2)),
+            'X-CopilotEdge-Model': this.isFallbackActive && this.fallbackModel ? this.fallbackModel : this.model,
+            'X-CopilotEdge-Latency': `${latency}ms`
             // Security headers are added automatically by Cloudflare
           }
         });
@@ -1823,8 +1851,40 @@ export function createCopilotEdgeHandler(config?: CopilotEdgeConfig) {
   return edge.createNextHandler();
 }
 
-// Export Durable Objects
-export { ConversationDO, type ConversationState, type WSMessage } from './durable-objects';
+// Re-export telemetry types and classes
+export {
+  type TelemetryConfig,
+  type TelemetryMetrics,
+  TelemetryManager,
+  SpanNames
+} from './telemetry';
+
+// Re-export token counting utilities
+export {
+  TokenCounter,
+  getTokenCounter,
+  MODEL_PRICING
+} from './tokenUtils';
+
+// Re-export Durable Objects
+export { 
+  ConversationDO, 
+  type ConversationState, 
+  type WSMessage 
+} from './durable-objects';
+
+// Define metrics interface type (matches the return type of getMetrics())
+export interface CopilotEdgeMetrics {
+  totalRequests: number;
+  cacheHits: number;
+  cacheHitRate: number;
+  avgLatency: number;
+  errors: number;
+  errorRate: number;
+  fallbackUsed: number;
+  fallbackRate: number;
+  activeModel: string;
+}
 
 // Default export
 export default CopilotEdge;
