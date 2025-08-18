@@ -72,6 +72,44 @@ console.log(data.choices[0].message.content);
 
 ## Advanced Features
 
+### Streaming Responses
+
+Get immediate feedback as AI generates content:
+
+```typescript
+// Enable streaming globally
+const handler = createCopilotEdgeHandler({
+  apiKey: process.env.CLOUDFLARE_API_TOKEN,
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+  stream: true  // All requests will stream by default
+});
+
+// Or enable per-request
+const response = await fetch('/api/copilotedge', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    messages: [{ role: 'user', content: 'Tell me a story' }],
+    stream: true  // Stream this specific request
+  })
+});
+
+// Handle the stream
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  console.log(decoder.decode(value));
+}
+```
+
+**Benefits:**
+- First token in ~200ms (vs 2-5s non-streaming)
+- Better UX with progressive display
+- Server-Sent Events (SSE) format
+- OpenAI-compatible streaming
+
 ### Telemetry & Cost Tracking
 
 Track token usage and costs for your telemetry dashboard:
