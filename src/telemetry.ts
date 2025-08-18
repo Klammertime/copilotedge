@@ -66,6 +66,14 @@ export interface TelemetryConfig {
     custom?: (spans: Span[]) => void;
   };
   debug?: boolean;
+  // Batch configuration for OTLP exporter
+  batchConfig?: {
+    maxQueueSize?: number;        // Maximum number of spans to queue (default: 100)
+    maxExportBatchSize?: number;  // Maximum batch size for export (default: 50)
+    batchSize?: number;           // Alias for maxExportBatchSize
+    exportTimeoutMillis?: number; // Timeout for export operations (default: 30000)
+    batchTimeoutMs?: number;      // Alias for scheduledDelayMillis (how often to export)
+  };
 }
 
 /**
@@ -104,6 +112,13 @@ export interface CopilotSpanAttributes extends Attributes {
   'ai.cost.output_usd'?: number;
   'ai.cost.total_usd'?: number;
   'ai.cost.estimated'?: boolean;
+  // Dashboard-specific metrics
+  'dashboard.user_id'?: string;
+  'dashboard.session_id'?: string;
+  'dashboard.request_source'?: string;
+  'dashboard.api_version'?: string;
+  'dashboard.cost_savings_usd'?: number; // Savings from cache hits
+  'dashboard.carbon_saved_grams'?: number; // Environmental impact from cache
   // Correlation IDs
   'correlation.id'?: string;
   'conversation.id'?: string;
@@ -219,11 +234,19 @@ export class TelemetryManager {
           timeoutMillis: this.config.exportInterval || 10000
         });
         
+        // Support both naming conventions for batch configuration
+        const batchSize = this.config.batchConfig?.maxExportBatchSize || 
+                         this.config.batchConfig?.batchSize || 
+                         50;
+        const batchTimeout = this.config.batchConfig?.batchTimeoutMs || 
+                           this.config.exportInterval || 
+                           10000;
+        
         processors.push(new BatchSpanProcessor(otlpExporter, {
-          maxQueueSize: 100,
-          maxExportBatchSize: 50,
-          scheduledDelayMillis: this.config.exportInterval || 10000,
-          exportTimeoutMillis: 30000
+          maxQueueSize: this.config.batchConfig?.maxQueueSize || 100,
+          maxExportBatchSize: batchSize,
+          scheduledDelayMillis: batchTimeout,
+          exportTimeoutMillis: this.config.batchConfig?.exportTimeoutMillis || 30000
         }));
       } catch (error) {
         console.error('[Telemetry] Failed to create OTLP exporter:', error);

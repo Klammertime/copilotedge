@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { CopilotEdge } from '../dist/index';
+import { CopilotEdge } from '../src/index';
 import { Miniflare } from 'miniflare';
 
 describe('CopilotEdge Integration Tests', () => {

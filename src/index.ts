@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { TelemetryConfig, TelemetryManager, SpanNames } from './telemetry';
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import { getTokenCounter, TokenCounter } from './tokenUtils';
+import { SecurityConfig, SecurityManager, SecureLogger } from './security';
 
 /**
  * Simple logging functions - no classes needed in Workers
@@ -163,6 +164,17 @@ export interface CopilotEdgeConfig {
    * If not set, a new conversation is created for each session.
    */
   defaultConversationId?: string;
+  /**
+   * Security configuration for request validation, encryption, and rate limiting.
+   * @since v0.9.1
+   */
+  security?: SecurityConfig;
+  /**
+   * Durable Object namespace for distributed rate limiting.
+   * Required when using distributed rate limiting.
+   * @example env.RATE_LIMITER_DO (bind in wrangler.toml)
+   */
+  rateLimiterDO?: DurableObjectNamespace;
 }
 
 /**
@@ -317,7 +329,6 @@ export class CopilotEdge {
   private fallbackModel: string | null;
   private provider: string;
   private debug: boolean;
-  private logger: ReturnType<typeof createLogger>;
   private cache: Map<string, { data: any; timestamp: number }>;
   private cacheTimeout: number;
   private apiTimeout: number;
@@ -347,6 +358,8 @@ export class CopilotEdge {
   private enableConversations: boolean;
   private defaultConversationId?: string;
   private telemetry: TelemetryManager | null = null;
+  private security: SecurityManager | null = null;
+  private logger: SecureLogger | ReturnType<typeof createLogger>;
 
   /**
    * Creates an instance of CopilotEdge.
@@ -385,7 +398,6 @@ export class CopilotEdge {
     
     // Workers is always production, debug must be explicitly enabled
     this.debug = config.debug || false;
-    this.logger = createLogger(this.debug);
     this.cacheTimeout = config.cacheTimeout || DEFAULTS.CACHE_TIMEOUT;
     this.maxRetries = config.maxRetries || DEFAULTS.MAX_RETRIES;
     this.rateLimit = config.rateLimit || DEFAULTS.RATE_LIMIT;
@@ -455,7 +467,7 @@ export class CopilotEdge {
       this.telemetry = new TelemetryManager({
         ...config.telemetry,
         environment,
-        serviceVersion: '0.9.0',
+        serviceVersion: '0.9.1',
         attributes: {
           'copilotedge.model_hash': modelHash, // Hashed model identifier
           'copilotedge.model_provider': modelProvider, // Generic provider category
@@ -464,6 +476,19 @@ export class CopilotEdge {
           ...config.telemetry.attributes
         }
       });
+    }
+
+    // Initialize security if configured
+    if (config.security) {
+      this.security = new SecurityManager(
+        config.security,
+        config.rateLimiterDO
+      );
+      // Use secure logger if security is enabled
+      this.logger = this.security.getLogger();
+    } else {
+      // Use simple logger if security not enabled
+      this.logger = createLogger(this.debug);
     }
     
     // Initialize token counter

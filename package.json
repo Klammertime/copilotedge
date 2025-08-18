@@ -1,6 +1,6 @@
 {
   "name": "copilotedge",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -8,6 +8,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.js"
+    },
+    "./rate-limiter": {
+      "types": "./dist/rate-limiter.d.ts",
+      "import": "./dist/rate-limiter.js",
+      "require": "./dist/rate-limiter.js"
+    },
+    "./security": {
+      "types": "./dist/security.d.ts",
+      "import": "./dist/security.js",
+      "require": "./dist/security.js"
     }
   },
   "sideEffects": false,
@@ -18,15 +28,17 @@
     "CHANGELOG.md",
     "LICENSE"
   ],
-  "description": "The only adapter connecting CopilotKit to Cloudflare Workers AI - now with OpenAI's open-source gpt-oss models (Apache 2.0)",
+  "description": "Bridge any AI frontend to Cloudflare Workers AI - Protocol adapter for CopilotKit and OpenAI with built-in telemetry",
   "keywords": [
-    "copilotkit",
-    "cloudflare",
-    "workers-ai",
+    "cloudflare-workers-ai",
+    "copilotkit-adapter",
+    "openai-compatible",
     "edge-computing",
     "llm",
-    "adapter",
-    "cache"
+    "telemetry",
+    "token-tracking",
+    "cost-tracking",
+    "workers-ai"
   ],
   "author": "Klammertime",
   "license": "MIT",
@@ -54,8 +66,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@copilotkit/react-core": ">=0.20.0",
-    "@copilotkit/react-ui": ">=0.20.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.203.0",
     "@opentelemetry/resources": "^2.0.1",
@@ -65,15 +75,10 @@
     "js-tiktoken": "^1.0.21"
   },
   "peerDependencies": {
-    "next": ">=13.0.0",
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0"
+    "next": ">=13.0.0"
   },
   "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
-    "react-dom": {
+    "next": {
       "optional": true
     }
   },
@@ -83,14 +88,12 @@
     }
   },
   "devDependencies": {
-    "@copilotkit/react-core": "^0.28.0",
-    "@copilotkit/react-ui": "^0.28.0",
-    "@types/node": "^20.0.0",
-    "@typescript-eslint/eslint-plugin": "^6.19.0",
-    "@typescript-eslint/parser": "^6.19.0",
+    "@types/node": "^24.3.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "@vitest/coverage-v8": "^3.2.4",
-    "eslint": "^8.56.0",
-    "miniflare": "^3.20250718.1",
+    "eslint": "^8.57.1",
+    "miniflare": "^4.20250813.1",
     "next": "^15.4.6",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"

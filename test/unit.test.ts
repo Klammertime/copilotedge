@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import CopilotEdge, { ValidationError } from '../src/index';
+import { CopilotEdge, ValidationError } from '../src/index';
 
 // Import crypto for use in tests
 import * as nodeCrypto from 'node:crypto';

@@ -10,12 +10,15 @@
 import { createCopilotEdgeHandler, CopilotEdge } from 'copilotedge';
 
 /**
- * Creates a Next.js API route handler for serving OpenAI models via Cloudflare.
+ * Creates a request handler for serving OpenAI models via Cloudflare Workers AI.
+ * 
+ * While this example shows Next.js usage, the handler works with any framework
+ * or can be used directly in Cloudflare Workers.
  * 
  * It automatically reads `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
  * from environment variables.
  * 
- * @returns {function} A Next.js API route handler.
+ * @returns {function} A request handler compatible with Next.js, Express, or Workers.
  */
 export function createOpenAIHandler() {
   return createCopilotEdgeHandler({
@@ -65,7 +68,7 @@ export function createOpenAIHandler() {
  * This can be run in a Node.js environment to verify your setup.
  */
 async function testOpenAIIntegration() {
-  console.log('🧪 Testing OpenAI model with fallback...');
+  console.log('Testing OpenAI model with fallback...');
   
   let edge = null;
   try {
@@ -117,7 +120,6 @@ async function testOpenAIIntegration() {
   } finally {
     // Always clean up resources, even if there was an error
     // No cleanup needed - Workers handles this automatically
-    }
   }
 }
 

@@ -5,7 +5,76 @@ All notable changes to CopilotEdge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.0] - 2025-01-17
+## [0.9.1]
+
+### 🔐 Security Release - CRITICAL FIXES
+
+### Added
+
+- **🛡️ Comprehensive Security Module:**
+  - `SecurityManager` class for centralized security controls
+  - `SecureLogger` with automatic sensitive data redaction
+  - Request signing with HMAC-SHA256 validation
+  - Memory monitoring for Workers 128MB limit
+  - KV encryption with AES-256-GCM
+  - Security headers and CORS configuration
+  - Input sanitization and validation
+- **🚦 Distributed Rate Limiting:**
+  - `RateLimiterDO` Durable Object for consistent rate limiting
+  - `RateLimiterClient` for easy integration
+  - Multiple time windows (minute/hour/day)
+  - Automatic client tracking with LRU eviction
+  - Works across all Workers instances globally
+- **📝 Security Documentation:**
+  - `SECURITY.md` - Comprehensive security best practices
+  - `examples/secure-worker.ts` - Production-ready secure example
+  - `SECURITY_FIXES_APPLIED.md` - Detailed fix documentation
+  - Updated all examples to use wrangler secrets
+- **🔒 Credential Protection:**
+  - Automatic detection of hardcoded credentials
+  - Warnings for insecure configuration
+  - Enforced wrangler secrets usage
+  - Security event logging
+
+### Changed
+
+- **📊 Structured Logging (BREAKING):**
+  - Removed all 81 console statements
+  - Replaced with structured JSON logging
+  - Automatic sensitive data redaction
+  - Security event categorization
+- **🔄 Async Rate Limiting (BREAKING):**
+  - `checkRateLimit()` now returns Promise
+  - Uses Durable Objects for distribution
+  - More effective across auto-scaling
+- **🔐 Secure Defaults:**
+  - Memory monitoring enabled by default
+  - Security headers enabled by default
+  - Request validation on all endpoints
+  - Input sanitization automatic
+
+### Fixed
+
+- **Critical Security Issues:**
+  - CVE-2024-53382 (PrismJS XSS) - Properly mitigated
+  - Hardcoded credentials in examples - Removed
+  - Ineffective rate limiting - Now distributed
+  - Unencrypted KV storage - Now encrypted
+  - Missing request validation - Now enforced
+  - Sensitive data in logs - Now redacted
+  - Memory exhaustion attacks - Now monitored
+  - Missing security headers - Now applied
+
+### Security
+
+- Request signing prevents tampering and replay attacks
+- KV encryption protects sensitive cached data
+- Memory monitoring prevents DoS via memory exhaustion
+- Distributed rate limiting effective across all instances
+- Input sanitization prevents injection attacks
+- Security headers protect against common web vulnerabilities
+
+## [0.9.0]
 
 ### Added
 
@@ -15,19 +84,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Re-exported telemetry types (`TelemetryConfig`, `TelemetryMetrics`, `TelemetryManager`)
   - Re-exported token utilities (`TokenCounter`, `getTokenCounter`, `MODEL_PRICING`)
   - Named exports for all classes and utilities
-  
+- **📦 Batch Configuration for Telemetry:**
+  - New `batchConfig` option for fine-tuning OTLP exports
+  - `maxQueueSize` - Control span queue size (default: 100)
+  - `maxExportBatchSize` / `batchSize` - Spans per batch (default: 50)
+  - `batchTimeoutMs` - Export interval control (default: 10000ms)
+  - `exportTimeoutMillis` - Export operation timeout (default: 30000ms)
+  - Optimized configurations for different use cases (high-volume, real-time, edge)
 - **🔧 Environment Auto-Discovery:**
   - `COPILOTEDGE_API_KEY` - Auto-discover API key (priority over `CLOUDFLARE_API_TOKEN`)
   - `COPILOTEDGE_ACCOUNT_ID` - Auto-discover account ID (priority over `CLOUDFLARE_ACCOUNT_ID`)
   - `COPILOTEDGE_ENVIRONMENT` - Auto-discover deployment environment (falls back to `NODE_ENV`)
   - `COPILOTEDGE_TELEMETRY_ENDPOINT` - Already supported, now documented
-  - Priority order: explicit config > COPILOTEDGE_* > standard env vars > defaults
-  
+  - Priority order: explicit config > COPILOTEDGE\_\* > standard env vars > defaults
 - **📊 Enhanced Response Headers:**
   - `X-CopilotEdge-Cache-Hit-Rate` - Current cache hit rate (0-1)
   - `X-CopilotEdge-Model` - Model used for the request
   - `X-CopilotEdge-Latency` - Request processing time in ms
-  
 - **📚 Comprehensive API Documentation:**
   - Complete API reference at `docs/api-reference.md`
   - All import patterns documented (ES modules, CommonJS, dynamic)
@@ -42,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All internal modules (`telemetry`, `tokenUtils`, `durable-objects`) now properly bundled
   - Package can be imported normally without workarounds
   - Dynamic imports no longer required
-  
+
 ### Improved
 
 - **Developer Experience:**
@@ -63,21 +136,21 @@ import {
   TokenCounter,
   TelemetryManager,
   type CopilotEdgeConfig,
-  type CopilotEdgeMetrics
-} from 'copilotedge';
+  type CopilotEdgeMetrics,
+} from "copilotedge";
 
 // New: Environment auto-discovery (set these env vars)
-COPILOTEDGE_API_KEY=your-key
-COPILOTEDGE_ENVIRONMENT=production
+COPILOTEDGE_API_KEY = your - key;
+COPILOTEDGE_ENVIRONMENT = production;
 
 // Minimal config with auto-discovery
 const copilot = new CopilotEdge({
-  telemetry: { enabled: true }
+  telemetry: { enabled: true },
   // Everything else auto-discovered!
 });
 ```
 
-## [0.8.0] - 2025-01-12
+## [0.8.0]
 
 ### Added
 
@@ -88,8 +161,8 @@ const copilot = new CopilotEdge({
   - Model-specific pricing configurations
   - Token metrics in OpenTelemetry spans (`ai.tokens.input`, `ai.tokens.output`, `ai.tokens.total`)
   - Cost attributes in telemetry (`ai.cost.input_usd`, `ai.cost.output_usd`, `ai.cost.total_usd`)
-  
 - **🔍 Enhanced Telemetry Attributes:**
+
   - Request correlation IDs for distributed tracing
   - Conversation and user ID tracking
   - Automatic dashboard endpoint discovery via environment variables
@@ -117,7 +190,7 @@ const copilot = new CopilotEdge({
 - Zero overhead when telemetry is disabled
 - Compatible with dashboard telemetry collectors
 
-## [0.7.0] - 2025-01-12
+## [0.7.0]
 
 ### Added
 
@@ -156,7 +229,7 @@ const copilot = new CopilotEdge({
 - Automatic context propagation across async operations
 - Follows OpenTelemetry semantic conventions
 
-## [0.6.0] - 2025-01-11
+## [0.6.0]
 
 ### Added
 
@@ -191,7 +264,7 @@ const copilot = new CopilotEdge({
 - 87 out of 88 tests passing (1 WebSocket mock limitation)
 - Follows Cloudflare best practices for Durable Objects
 
-## [0.5.0] - 2025-01-11
+## [0.5.0]
 
 ### Added
 
@@ -224,7 +297,7 @@ const copilot = new CopilotEdge({
 - See [KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for details
 - v0.5.1 will focus on improving test coverage to 80%+
 
-## [0.4.0] - 2025-08-11
+## [0.4.0]
 
 ### Added
 
@@ -251,11 +324,11 @@ const copilot = new CopilotEdge({
 ### Technical Details
 
 - New `callCloudflareAIStreaming()` method using async generators
-- Streaming works with all Cloudflare chat models (@cf/meta/*, @cf/mistral/*, @cf/google/*)
+- Streaming works with all Cloudflare chat models (@cf/meta/_, @cf/mistral/_, @cf/google/\*)
 - Per-request streaming override (request parameter takes precedence over instance config)
 - Backward compatible - non-streaming remains the default behavior
 
-## [0.3.0] - 2025-08-10
+## [0.3.0]
 
 ### Added
 
@@ -272,7 +345,7 @@ const copilot = new CopilotEdge({
 
 - **Project Cleanup:** Removed all misleading, redundant, and non-functional example files to provide a clear and trustworthy developer experience.
 
-## [0.2.7] – 2025-08-09
+## [0.2.7]
 
 ### Added
 
@@ -287,7 +360,7 @@ const copilot = new CopilotEdge({
 - Improved examples showing both gpt-oss-120b and gpt-oss-20b usage
 - Enhanced package description to highlight open-source model support
 
-## [0.2.6] – 2025-08-09
+## [0.2.6]
 
 ### Added
 
@@ -313,7 +386,7 @@ const copilot = new CopilotEdge({
 - Enhanced core implementation with better error handling and streaming support
 - Updated CI workflow configuration for better test coverage
 
-## [0.2.5] – 2025-08-09
+## [0.2.5]
 
 ### Fixed
 
@@ -340,14 +413,14 @@ const copilot = new CopilotEdge({
 - Enhanced `clearCache()` to also clear cache locks
 - Improved error messages for request validation
 
-## [0.2.3] – 2025-08-08
+## [0.2.3]
 
 ### Fixed
 
 - Update CI badge to point to correct workflow
 - Only run unit tests in CI (integration tests need real credentials)
 
-## [0.2.2] – 2025-08-08
+## [0.2.2]
 
 ### Added
 
@@ -364,7 +437,7 @@ const copilot = new CopilotEdge({
 
 - Integration tests now include miniflare dependency
 
-## [0.2.1] – 2025-08-08
+## [0.2.1]
 
 ### Breaking
 
@@ -393,7 +466,7 @@ const copilot = new CopilotEdge({
 - Sensitive content detection no longer exposed in headers.
 - Model pricing aligned with current Cloudflare rates.
 
-## [0.2.0] – 2025-08-07
+## [0.2.0]
 
 ### Added
 
@@ -407,7 +480,7 @@ const copilot = new CopilotEdge({
 - Header tracking implemented without affecting routing.
 - Maintains full backward compatibility.
 
-## [0.1.0] – 2025-08-07
+## [0.1.0]
 
 ### Initial Release
 

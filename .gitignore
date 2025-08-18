@@ -10,6 +10,7 @@ build/
 # Testing
 coverage/
 .nyc_output/
+*.backup
 
 # IDE
 .vscode/
@@ -23,6 +24,7 @@ coverage/
 .env
 .env.local
 .env.*.local
+.dev.vars
 
 # Logs
 logs/
@@ -44,16 +46,22 @@ temp/
 
 # NPM package output
 *.tgz
+copilotedge-*.tgz
 
-# Dev notes
-New_Research.md
-cloudflare-copilotkit-known-issues.md
+# Cloudflare/Wrangler
+.wrangler/
+.dev.vars
+.mf/
 
-# Competitive strategy (CONFIDENTIAL)
-competitive-edge.md
-COMPETITIVE-*.md
-*-CONFIDENTIAL.md
-NEXT_STEPS.md
-strategy/
-.private/RELEASE_CHECKLIST.md
+# Planning/Documentation (if you want to keep local notes)
+*.PLAN.md
+*.NOTES.md
+RELEASE_*.md
 roadmap/
+TODO.md
+
+# Security - NEVER commit these
+*.key
+*.pem
+*.cert
+secrets/
